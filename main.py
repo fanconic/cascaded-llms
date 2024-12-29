@@ -1,3 +1,4 @@
+import scienceplots
 import torch
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -8,9 +9,11 @@ import seaborn as sns
 from torch.nn.functional import kl_div, log_softmax
 import torch.nn.functional as F
 from tqdm import tqdm
+import datetime
+import numpy as np
 
 sns.set_style("whitegrid")
-#plt.style.use("science")
+plt.style.use("science")
 plt.rcParams["font.family"] = "sans-serif"
 
 # Parameters
@@ -23,12 +26,14 @@ SMALL_MODEL = "meta-llama/Llama-3.2-1B-Instruct"
 LARGE_MODEL = (
     "/mnt/pdata/caf83/helm/me-llama/physionet.org/files/me-llama/1.0.0/MeLLaMA-13B-chat"
 )
-LARGE_MODEL =  "meta-llama/Llama-3.1-8B-Instruct"
+LARGE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
 PROBABILITY_THRESHOLD = 1.0
 UNCERTAINTY_THRESHOLD = 0.3
 BATCH_SIZE = 7
 MAX_INPUT_LENGTH = 512
-NUM_SAMPLES = 70
+NUM_SAMPLES = 100
+now = datetime.datetime.now()
+RUN_NAME = f"debug_{now.year}{now.month}{now.day}_{now.hour}{now.minute}"
 
 
 class ClinicalHELM:
@@ -44,7 +49,9 @@ class ClinicalHELM:
         self.large_tokenizer = AutoTokenizer.from_pretrained(LARGE_MODEL)
         self.large_tokenizer.pad_token = self.large_tokenizer.eos_token
         self.large_tokenizer.padding_side = "left"
-        self.large_model = AutoModelForCausalLM.from_pretrained(LARGE_MODEL).to("cuda:1")
+        self.large_model = AutoModelForCausalLM.from_pretrained(LARGE_MODEL).to(
+            "cuda:1"
+        )
 
         self.verification_threshold = PROBABILITY_THRESHOLD
         self.uncertainty_threshold = UNCERTAINTY_THRESHOLD
@@ -78,7 +85,7 @@ class ClinicalHELM:
                 base_probs, large_probs, reduction="batchmean", log_target=True
             )
             return kl_divergence.item()
-        
+
     def compute_generated_log_probs(
         self,
         model,
@@ -86,7 +93,7 @@ class ClinicalHELM:
         prompts,
         generated_responses,
         device="cuda",
-        normalize_by_length=True
+        normalize_by_length=True,
     ):
         """
         Computes the log probability (or average log probability) *only* over the generated
@@ -95,7 +102,7 @@ class ClinicalHELM:
         :param model: A language model (e.g., GPT-like) in huggingface/transformers style.
         :param tokenizer: The corresponding tokenizer.
         :param prompts: List[str], the user prompts for each example in the batch.
-        :param generated_responses: List[str], the generated responses (small-model output) 
+        :param generated_responses: List[str], the generated responses (small-model output)
                                     for each example in the batch.
         :param device: Which device to run on.
         :param normalize_by_length: If True, we divide the final log prob by the number
@@ -107,16 +114,16 @@ class ClinicalHELM:
 
         batch_full_texts = []
         prompt_lengths = []  # number of tokens in the prompt portion
-        gen_lengths = []     # number of tokens in the generated portion
+        gen_lengths = []  # number of tokens in the generated portion
 
         # 1. Build the combined sequences, record lengths
         for prompt, full_text in zip(prompts, generated_responses):
-            gen_resp = full_text[len(prompt):]
+            gen_resp = full_text[len(prompt) :]
             prompt_ids = tokenizer(prompt, add_special_tokens=False).input_ids
-            gen_ids    = tokenizer(gen_resp, add_special_tokens=False).input_ids
+            gen_ids = tokenizer(gen_resp, add_special_tokens=False).input_ids
 
             prompt_len = len(prompt_ids)
-            gen_len    = len(gen_ids)
+            gen_len = len(gen_ids)
 
             batch_full_texts.append(full_text)
             prompt_lengths.append(prompt_len)
@@ -131,7 +138,7 @@ class ClinicalHELM:
             max_length=MAX_INPUT_LENGTH,
         ).to(model.device)
 
-        input_ids = inputs["input_ids"]         # [batch, seq_len]
+        input_ids = inputs["input_ids"]  # [batch, seq_len]
         attention_mask = inputs["attention_mask"]  # [batch, seq_len]
 
         # 3. Forward pass
@@ -140,15 +147,15 @@ class ClinicalHELM:
             logits = outputs.logits.to(device)  # [batch, seq_len, vocab_size]
 
         # 4. Shift the logits (causal LM): we compare logits[:, t] to input_ids[:, t+1]
-        shift_logits = logits[:, :-1, :].contiguous()      # [batch, seq_len-1, vocab_size]
-        shift_labels = input_ids[:, 1:].contiguous().to(device)       # [batch, seq_len-1]
-        shift_mask   = attention_mask[:, 1:].contiguous().to(device)   # [batch, seq_len-1]
+        shift_logits = logits[:, :-1, :].contiguous()  # [batch, seq_len-1, vocab_size]
+        shift_labels = input_ids[:, 1:].contiguous().to(device)  # [batch, seq_len-1]
+        shift_mask = attention_mask[:, 1:].contiguous().to(device)  # [batch, seq_len-1]
 
         # 5. Compute token-level cross-entropy (returns per-token loss)
         token_loss = F.cross_entropy(
             shift_logits.view(-1, shift_logits.size(-1)),
             shift_labels.view(-1),
-            reduction='none'  # we want per-token
+            reduction="none",  # we want per-token
         )
         token_loss = token_loss.view(shift_labels.size())  # [batch, seq_len-1]
 
@@ -158,27 +165,31 @@ class ClinicalHELM:
 
         for i in range(shift_labels.size(0)):
             start_idx = prompt_lengths[i]
-            end_idx   = prompt_lengths[i] + gen_lengths[i]
+            end_idx = prompt_lengths[i] + gen_lengths[i]
 
             # For safety, clamp start_idx-1 to >=0
             gen_start_in_shift = max(start_idx - 1, 0)
-            gen_end_in_shift   = max(end_idx - 1, 0)
+            gen_end_in_shift = max(end_idx - 1, 0)
 
             # clamp to the actual length of shift_labels
             seq_len_i = shift_labels.size(1)
             gen_start_in_shift = min(gen_start_in_shift, seq_len_i)
-            gen_end_in_shift   = min(gen_end_in_shift, seq_len_i)
+            gen_end_in_shift = min(gen_end_in_shift, seq_len_i)
 
             # Now sum up the negative log-likelihood over that slice
             # token_loss[i, t] is = -log p(token t+1), so summation is total NLL
-            gen_loss_i = (token_loss[i, :] * shift_mask[i, :])[gen_start_in_shift:gen_end_in_shift].sum()
+            gen_loss_i = (token_loss[i, :] * shift_mask[i, :])[
+                gen_start_in_shift:gen_end_in_shift
+            ].sum()
 
             # Convert negative log-likelihood to log-prob
             seq_log_prob_i = -gen_loss_i  # sum of log probs in that region
 
             # 7. Normalization
             if normalize_by_length:
-                n_gen_tokens = (shift_mask[i, gen_start_in_shift:gen_end_in_shift] == 1).sum()
+                n_gen_tokens = (
+                    shift_mask[i, gen_start_in_shift:gen_end_in_shift] == 1
+                ).sum()
                 if n_gen_tokens > 0:
                     seq_log_prob_i = seq_log_prob_i / n_gen_tokens
 
@@ -204,7 +215,7 @@ class ClinicalHELM:
             prompts=prompts,
             generated_responses=base_outputs,
             device="cuda:2",
-            normalize_by_length=True
+            normalize_by_length=True,
         )
 
         # If you want the large model's perspective on the *same text*:
@@ -214,7 +225,7 @@ class ClinicalHELM:
             prompts=prompts,
             generated_responses=base_outputs,  # note: we pass base_outputs as the text to verify
             device="cuda:2",
-            normalize_by_length=True
+            normalize_by_length=True,
         )
 
         # 3. Now you can define a difference or ratio
@@ -284,7 +295,10 @@ class ClinicalHELM:
                             "large_response": large_response,
                             "prob_delta": prob_delta,
                             "uncertainty": large_uncertainty,
-                            "cost": SMALL_GEN_COST + LARGE_INF_COST + LARGE_GEN_COST + EXPERT_COST,
+                            "cost": SMALL_GEN_COST
+                            + LARGE_INF_COST
+                            + LARGE_GEN_COST
+                            + EXPERT_COST,
                         }
                     )
 
@@ -292,7 +306,7 @@ class ClinicalHELM:
 
 
 def extract_predictions(response: str) -> str:
-    """ Extract the single MC prediction from the response text
+    """Extract the single MC prediction from the response text
 
     Args:
         response (str): Full response of the LLMs
@@ -301,11 +315,11 @@ def extract_predictions(response: str) -> str:
         str: Single character response (A, B, C, D, or E) of the MC question
     """
     try:
-        if response.startswith("The best answer is: "): #8B
+        if response.startswith("The best answer is: "):  # 8B
             return response[len("The best answer is: ")]
-        elif response.startswith("The best answer is "): # 1B
+        elif response.startswith("The best answer is "):  # 1B
             return response[len("The best answer is ")]
-        elif response[0] in {"A", "B", "C", "D", "E"}: #MEDLLama
+        elif response[0] in {"A", "B", "C", "D", "E"}:  # MEDLLama
             return response[0]
         else:
             return None
@@ -315,7 +329,9 @@ def extract_predictions(response: str) -> str:
 
 def main():
     # Load dataset
-    dataset = load_dataset("medalpaca/medical_meadow_medqa", split=f"train[:{NUM_SAMPLES}]")
+    dataset = load_dataset(
+        "medalpaca/medical_meadow_medqa", split=f"train[:{NUM_SAMPLES}]"
+    )
 
     helm = ClinicalHELM()
 
@@ -336,7 +352,7 @@ def main():
     for batch in tqdm(dataloader):
         prompts = [
             f"{sample}\nPlease answer with only one of the multiple choice option in the brackets and give an explanation. The format should be in the format 'The best answer is: <ans>\n\nExplanation:'"
-            for sample in batch['input']
+            for sample in batch["input"]
         ]
         batch_decisions, small_predictions, large_predictions = helm.decide_batch(
             prompts
@@ -367,6 +383,14 @@ def main():
             "label": labels,
             "prediction": predictions,
             "cost": costs,
+            "base_response": all_small_predictions,
+            "base_prediction": [
+                extract_predictions(pred) for pred in all_small_predictions
+            ],
+            "large_response": all_large_predictions,
+            "large_prediction": [
+                extract_predictions(pred) for pred in all_large_predictions
+            ],
         }
     )
 
@@ -381,7 +405,13 @@ def main():
     ]
 
     accuracy_base = sum(small_model_correct) / len(small_model_correct)
+    accuracy_base_err = np.array(small_model_correct).std() / np.sqrt(
+        len(small_model_correct)
+    )
     accuracy_large = sum(large_model_correct) / len(small_model_correct)
+    accuracy_large_err = np.array(large_model_correct).std() / np.sqrt(
+        len(large_model_correct)
+    )
 
     cost_base = len(dataset) * SMALL_GEN_COST
     cost_large = len(dataset) * LARGE_GEN_COST
@@ -389,38 +419,80 @@ def main():
     # Calculate dynamic decision accuracy and costs
     data["correct"] = (data["prediction"] == data["label"]).astype(int)
     dynamic_accuracy = data["correct"].mean()
+    dynamic_accuracy_err = data["correct"].std() / np.sqrt(len(data["correct"]))
     dynamic_cost = data["cost"].sum()
 
-    # Visualisations
+    # First plot: Accuracy vs Cost Curve
     plt.figure(figsize=(10, 5))
-    plt.scatter(cost_base, accuracy_base, label="Base Model Only", marker="o")
-    plt.scatter(cost_large, accuracy_large, label="Large Model Only", marker="o")
-    plt.scatter(dynamic_cost, dynamic_accuracy, label="Dynamic Decisions", marker="x")
-    plt.scatter(EXPERT_COST * len(data), 1.0, label="Expert", marker="o")
-    # Add dashed lines between base model, large model, and expert
-    plt.plot([cost_base, cost_large, EXPERT_COST * len(data)], 
-            [accuracy_base, accuracy_large, 1.0], 
-            linestyle="--", color="gray")
+
+    # Plot each category and capture the colours from the auto-generated palette (with error bars
+    base_plot = plt.errorbar(
+        cost_base,
+        accuracy_base,
+        yerr=accuracy_base_err,
+        label="Base Model",
+        fmt="o",
+        capsize=5,
+    )
+    large_plot = plt.errorbar(
+        cost_large,
+        accuracy_large,
+        yerr=accuracy_large_err,
+        label="Large Model",
+        fmt="o",
+        capsize=5,
+    )
+    dynamic_plot = plt.errorbar(
+        dynamic_cost,
+        dynamic_accuracy,
+        yerr=dynamic_accuracy_err,
+        label="Dynamic Decisions",
+        fmt="x",
+        capsize=5,
+    )
+    expert_plot = plt.errorbar(
+        EXPERT_COST * len(data), 1.0, yerr=0.0, label="Expert", fmt="o", capsize=5
+    )
+
+    # Extract colours from the plotted objects
+    base_color = base_plot[0].get_color()
+    large_color = large_plot[0].get_color()
+    expert_color = expert_plot[0].get_color()
+
+    # Connect points with dashed lines
+    plt.plot(
+        [cost_base, cost_large, EXPERT_COST * len(data)],
+        [accuracy_base, accuracy_large, 1.0],
+        linestyle="--",
+        color="gray",
+        alpha=0.7,
+    )
+
     plt.xlabel("Cumulative Cost")
     plt.ylabel("Accuracy")
-    plt.title("Accuracy vs Cost for Small, Large Models, and Dynamic Decisions")
+    plt.title("Accuracy vs Cost Curve")
     plt.legend()
-    plt.savefig("results/accuracy_vs_cost_comparison.pdf", bbox_inches="tight")
-    
-   
-        
-    # Decision distribution plot
+    plt.savefig(f"results/accuracy_vs_cost_{RUN_NAME}.pdf", bbox_inches="tight")
+
+    # Second plot: Decision distribution
     plt.figure(figsize=(8, 4))
-    decision_counts = data["decision"].value_counts(sort=False).reindex([0, 1, 2], fill_value=0)
-    decision_counts.plot(kind="bar", color=["blue", "orange", "red"], alpha=0.7)
+    decision_counts = (
+        data["decision"].value_counts(sort=False).reindex([0, 1, 2], fill_value=0)
+    )
+
+    # Use the extracted colours for the bar plot
+    decision_counts.plot(
+        kind="bar", color=[base_color, large_color, expert_color], alpha=0.7
+    )
     plt.xticks(
         ticks=[0, 1, 2], labels=["Base Model", "Large Model", "Expert"], rotation=0
     )
     plt.ylabel("Frequency")
     plt.title("Distribution of Decisions")
-    plt.savefig("results/decision_distribution.pdf", bbox_inches="tight")
-    
-    data.to_csv("result_df.csv")
+    plt.savefig(f"results/decision_distribution_{RUN_NAME}.pdf", bbox_inches="tight")
+
+    # Save data
+    data.to_csv(f"results/result_df_{RUN_NAME}.csv", index=False)
 
 
 if __name__ == "__main__":
