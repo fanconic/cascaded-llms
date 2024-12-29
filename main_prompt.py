@@ -23,18 +23,18 @@ SMALL_GEN_COST = 1.0
 LARGE_INF_COST = 0.2
 LARGE_GEN_COST = 5.0
 EXPERT_COST = 10.0
-SMALL_MODEL = "HuggingFaceTB/SmolLM-1.7B-Instruct"
+SMALL_MODEL = "meta-llama/Llama-3.2-1B-Instruct"
 LARGE_MODEL = (
     "/mnt/pdata/caf83/helm/me-llama/physionet.org/files/me-llama/1.0.0/MeLLaMA-13B-chat"
 )
-#LARGE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
-PROBABILITY_THRESHOLD = 1.0
+LARGE_MODEL = "meta-llama/Llama-3.1-8B-Instruct"
+PROBABILITY_THRESHOLD = 0.5  # For "YES"/"NO", treat YES => 1.0, NO => 0.0
 UNCERTAINTY_THRESHOLD = 0.3
 BATCH_SIZE = 7
 MAX_INPUT_LENGTH = 512
 NUM_SAMPLES = 1000
 now = datetime.datetime.now()
-RUN_NAME = f"smol_{now.year}{now.month}{now.day}_{now.hour}{now.minute}"
+RUN_NAME = f"debug_{now.year}{now.month}{now.day}_{now.hour}{now.minute}"
 
 
 class ClinicalHELM:
@@ -58,6 +58,9 @@ class ClinicalHELM:
         self.uncertainty_threshold = UNCERTAINTY_THRESHOLD
 
     def generate_response(self, model, tokenizer, prompts):
+        """
+        Generate a full answer from the given model for each prompt in 'prompts'.
+        """
         inputs = tokenizer(
             prompts,
             return_tensors="pt",
@@ -76,163 +79,67 @@ class ClinicalHELM:
         ]
         return responses, inputs
 
-    def compute_kl_divergence(
-        self, base_logits, large_logits, base_tokens, large_tokens
-    ):
-        with torch.no_grad():
-            base_probs = log_softmax(base_logits, dim=-1)
-            large_probs = log_softmax(large_logits, dim=-1)
-            kl_divergence = kl_div(
-                base_probs, large_probs, reduction="batchmean", log_target=True
-            )
-            return kl_divergence.item()
-
-    def compute_generated_log_probs(
-        self,
-        model,
-        tokenizer,
-        prompts,
-        generated_responses,
-        device="cuda",
-        normalize_by_length=True,
-    ):
+    def verify_with_large_model(self, prompt, base_answer):
         """
-        Computes the log probability (or average log probability) *only* over the generated
-        portion (i.e., ignoring the prompt tokens).
+        Prompts the large model to verify correctness of the small model's answer.
+        We ask for a single token: 'YES' or 'NO'.
 
-        :param model: A language model (e.g., GPT-like) in huggingface/transformers style.
-        :param tokenizer: The corresponding tokenizer.
-        :param prompts: List[str], the user prompts for each example in the batch.
-        :param generated_responses: List[str], the generated responses (small-model output)
-                                    for each example in the batch.
-        :param device: Which device to run on.
-        :param normalize_by_length: If True, we divide the final log prob by the number
-                                    of generated tokens.
-        :return: A 1D tensor [batch_size], where each entry is the log probability
-                (or avg log probability) of the *generated* portion only.
+        Returns a float:
+          1.0 if the large model responds with 'YES'
+          0.0 if the large model responds with 'NO'
+        (You could also return more nuanced scores if desired.)
         """
-        assert len(prompts) == len(generated_responses), "Mismatch in batch sizes!"
+        verify_prompt = (
+            f"Question:\n{prompt}\n\n"
+            f"Small model's answer:\n{base_answer}\n\n"
+            "Is the small model's answer correct? "
+            "Please respond with a single token: YES or NO."
+        )
 
-        batch_full_texts = []
-        prompt_lengths = []  # number of tokens in the prompt portion
-        gen_lengths = []  # number of tokens in the generated portion
-
-        # 1. Build the combined sequences, record lengths
-        for prompt, full_text in zip(prompts, generated_responses):
-            gen_resp = full_text[len(prompt) :]
-            prompt_ids = tokenizer(prompt, add_special_tokens=False).input_ids
-            gen_ids = tokenizer(gen_resp, add_special_tokens=False).input_ids
-
-            prompt_len = len(prompt_ids)
-            gen_len = len(gen_ids)
-
-            batch_full_texts.append(full_text)
-            prompt_lengths.append(prompt_len)
-            gen_lengths.append(gen_len)
-
-        # 2. Tokenize the *combined* sequences in a batch
-        inputs = tokenizer(
-            batch_full_texts,
+        inputs = self.large_tokenizer(
+            [verify_prompt],
             return_tensors="pt",
             padding=True,
             truncation=True,
             max_length=MAX_INPUT_LENGTH,
-        ).to(model.device)
+        ).to(self.large_model.device)
 
-        input_ids = inputs["input_ids"]  # [batch, seq_len]
-        attention_mask = inputs["attention_mask"]  # [batch, seq_len]
-
-        # 3. Forward pass
+        # We want to generate a very short response, ideally just 1–2 tokens
         with torch.no_grad():
-            outputs = model(**inputs)
-            logits = outputs.logits.to(device)  # [batch, seq_len, vocab_size]
+            outputs = self.large_model.generate(
+                **inputs,
+                max_new_tokens=2,    # Enough to capture "YES" or "NO"
+                pad_token_id=self.large_tokenizer.pad_token_id,
+            )
 
-        # 4. Shift the logits (causal LM): we compare logits[:, t] to input_ids[:, t+1]
-        shift_logits = logits[:, :-1, :].contiguous()  # [batch, seq_len-1, vocab_size]
-        shift_labels = input_ids[:, 1:].contiguous().to(device)  # [batch, seq_len-1]
-        shift_mask = attention_mask[:, 1:].contiguous().to(device)  # [batch, seq_len-1]
+        raw_text = self.large_tokenizer.decode(outputs[0], skip_special_tokens=True)
+        # Extract just the new portion after the prompt. A quick approach:
+        verification_text = raw_text[len(verify_prompt) :].strip()
 
-        # 5. Compute token-level cross-entropy (returns per-token loss)
-        token_loss = F.cross_entropy(
-            shift_logits.view(-1, shift_logits.size(-1)),
-            shift_labels.view(-1),
-            reduction="none",  # we want per-token
-        )
-        token_loss = token_loss.view(shift_labels.size())  # [batch, seq_len-1]
-
-        # 6. Now we accumulate the loss *only* in the region of generated tokens
-        #    We'll do this example-by-example, because each prompt/gen length is different.
-        batch_log_probs = torch.zeros(shift_labels.size(0), device=device)
-
-        for i in range(shift_labels.size(0)):
-            start_idx = prompt_lengths[i]
-            end_idx = prompt_lengths[i] + gen_lengths[i]
-
-            # For safety, clamp start_idx-1 to >=0
-            gen_start_in_shift = max(start_idx - 1, 0)
-            gen_end_in_shift = max(end_idx - 1, 0)
-
-            # clamp to the actual length of shift_labels
-            seq_len_i = shift_labels.size(1)
-            gen_start_in_shift = min(gen_start_in_shift, seq_len_i)
-            gen_end_in_shift = min(gen_end_in_shift, seq_len_i)
-
-            # Now sum up the negative log-likelihood over that slice
-            # token_loss[i, t] is = -log p(token t+1), so summation is total NLL
-            gen_loss_i = (token_loss[i, :] * shift_mask[i, :])[
-                gen_start_in_shift:gen_end_in_shift
-            ].sum()
-
-            # Convert negative log-likelihood to log-prob
-            seq_log_prob_i = -gen_loss_i  # sum of log probs in that region
-
-            # 7. Normalization
-            if normalize_by_length:
-                n_gen_tokens = (
-                    shift_mask[i, gen_start_in_shift:gen_end_in_shift] == 1
-                ).sum()
-                if n_gen_tokens > 0:
-                    seq_log_prob_i = seq_log_prob_i / n_gen_tokens
-
-            batch_log_probs[i] = seq_log_prob_i
-
-        return batch_log_probs
+        # You can refine the parsing, but here's a simple approach:
+        verification_text = verification_text.upper()
+        if "YES" in verification_text[:5]:
+            return 1.0
+        else:
+            # If it doesn't explicitly say YES, treat it as NO
+            return 0.0
 
     def decide_batch(self, prompts):
-        # This part here is only implemenmt like this, in order to efficiently compare against using dynamic vs small vs large model
-        # In Practice the inference part would not be batched, and the large model evaluation only called if the verification check fails
+        """
+        In this version, the large model does *not* compute log-probs of the base model's
+        answers. Instead, we prompt the large model to produce a single token 'YES'/'NO'
+        to indicate whether the base model's answer is correct.
+        """
+        # 1. Generate from the base (small) model
         base_outputs, _ = self.generate_response(
             self.base_model, self.base_tokenizer, prompts
         )
+
+        # 2. Also generate from the large model (if we need it)
+        #    We'll do it here for demonstration, but in practice might do it only if needed
         large_outputs, _ = self.generate_response(
             self.large_model, self.large_tokenizer, prompts
         )
-
-        # 2. Verify with the large model's log probs (we can still do it in one pass if desired)
-        #    But here we'll show how to compute the base model's *own* log prob, or large model's prob, etc.
-        base_log_probs = self.compute_generated_log_probs(
-            model=self.base_model,
-            tokenizer=self.base_tokenizer,
-            prompts=prompts,
-            generated_responses=base_outputs,
-            device="cuda:2",
-            normalize_by_length=True,
-        )
-
-        # If you want the large model's perspective on the *same text*:
-        large_log_probs = self.compute_generated_log_probs(
-            model=self.large_model,
-            tokenizer=self.large_tokenizer,
-            prompts=prompts,
-            generated_responses=base_outputs,  # note: we pass base_outputs as the text to verify
-            device="cuda:2",
-            normalize_by_length=True,
-        )
-
-        # 3. Now you can define a difference or ratio
-        # difference = log P_large - log P_base
-        difference = large_log_probs - base_log_probs
-        ratio = torch.exp(difference)
 
         decisions = []
         small_model_predictions = []
@@ -241,25 +148,34 @@ class ClinicalHELM:
         for i, prompt in enumerate(prompts):
             base_response = base_outputs[i]
             large_response = large_outputs[i]
+            # Optionally, the part after the prompt is the "answer"
+            base_answer_only = base_response[len(prompt) :].strip()
 
-            base_uncertainty = 0  # Placeholder for uncertainty calculation
-            large_uncertainty = 0  # Placeholder for uncertainty calculation
-            prob_delta = ratio[i].item()
+            # 3. Let the large model verify correctness of the small model’s answer
+            verification_score = self.verify_with_large_model(prompt, base_answer_only)
 
-            small_model_predictions.append(base_response[len(prompt) :].strip())
+            # Optionally define some "uncertainty." We'll keep it at 0.0 for now
+            base_uncertainty = 0.0
+            large_uncertainty = 0.0
+
+            # We interpret verification_score = 1.0 => 'YES', 0.0 => 'NO'
+            # If verification_score >= 0.5 => accept small model
+            prob_delta = verification_score
+
+            small_model_predictions.append(base_answer_only)
             large_model_predictions.append(large_response[len(prompt) :].strip())
 
+            # 4. Decide which route to pick, similar to your prior logic
             if prob_delta >= self.verification_threshold:
+                # Accept small model
                 if base_uncertainty < self.uncertainty_threshold:
                     decisions.append(
                         {
-                            "decision": 0,
+                            "decision": 0,  # 0 => base model
                             "response": base_response,
                             "base_response": base_response,
                             "large_response": large_response,
-                            "base_log_probs" : base_log_probs[i].item(),
-                            "large_log_probs" : large_log_probs[i].item(),
-                            "prob_delta": prob_delta,
+                            "verification_score": prob_delta,
                             "uncertainty": base_uncertainty,
                             "cost": SMALL_GEN_COST + LARGE_INF_COST,
                         }
@@ -267,28 +183,25 @@ class ClinicalHELM:
                 else:
                     decisions.append(
                         {
-                            "decision": 2,
+                            "decision": 2,  # 2 => expert
                             "response": None,
                             "base_response": base_response,
                             "large_response": large_response,
-                            "base_log_probs" : base_log_probs[i].item(),
-                            "large_log_probs" : large_log_probs[i].item(),
-                            "prob_delta": prob_delta,
+                            "verification_score": prob_delta,
                             "uncertainty": base_uncertainty,
                             "cost": SMALL_GEN_COST + LARGE_INF_COST + EXPERT_COST,
                         }
                     )
             else:
+                # Use large model
                 if large_uncertainty < self.uncertainty_threshold:
                     decisions.append(
                         {
-                            "decision": 1,
+                            "decision": 1,  # 1 => large model
                             "response": large_response,
                             "base_response": base_response,
                             "large_response": large_response,
-                            "base_log_probs" : base_log_probs[i].item(),
-                            "large_log_probs" : large_log_probs[i].item(),
-                            "prob_delta": prob_delta,
+                            "verification_score": prob_delta,
                             "uncertainty": large_uncertainty,
                             "cost": SMALL_GEN_COST + LARGE_INF_COST + LARGE_GEN_COST,
                         }
@@ -296,13 +209,11 @@ class ClinicalHELM:
                 else:
                     decisions.append(
                         {
-                            "decision": 2,
+                            "decision": 2,  # 2 => expert
                             "response": None,
                             "base_response": base_response,
                             "large_response": large_response,
-                            "base_log_probs" : base_log_probs[i].item(),
-                            "large_log_probs" : large_log_probs[i].item(),
-                            "prob_delta": prob_delta,
+                            "verification_score": prob_delta,
                             "uncertainty": large_uncertainty,
                             "cost": SMALL_GEN_COST
                             + LARGE_INF_COST
@@ -384,15 +295,20 @@ def main():
         for i, decision in enumerate(batch_decisions):
             decisions.append(decision["decision"])
             outputs.append(decision["response"])
-            prob_deltas.append(decision["prob_delta"])
+            prob_deltas.append(decision["verification_score"])
             uncerts.append(decision["uncertainty"])
             costs.append(decision["cost"])
             labels.append(batch["output"][i][0])
-            predictions.append(
-                extract_predictions(decision["response"][len(prompts[i]) :].strip())
-            )
-            base_log_prob.append(decision["base_log_probs"])
-            large_log_prob.append(decision["large_log_probs"])
+            # Extract final predicted letter (for MC question)
+            if decision["response"] is not None:
+                pred_letter = extract_predictions(
+                    decision["response"][len(prompts[i]) :].strip()
+                )
+            else:
+                pred_letter = None
+            predictions.append(pred_letter)
+            base_log_prob.append(None)   # Not used in this simplified version
+            large_log_prob.append(None)  # Not used in this simplified version
 
     # Create DataFrame
     data = pd.DataFrame(
@@ -448,7 +364,7 @@ def main():
     # First plot: Accuracy vs Cost Curve
     plt.figure(figsize=(10, 5))
 
-    # Plot each category and capture the colours from the auto-generated palette (with error bars
+    # Plot each category and capture the colours from the auto-generated palette (with error bars)
     base_plot = plt.errorbar(
         cost_base,
         accuracy_base,
@@ -495,7 +411,7 @@ def main():
     plt.ylabel("Accuracy")
     plt.title("Accuracy vs Cost Curve")
     plt.legend()
-    plt.savefig(f"results/accuracy_vs_cost_{RUN_NAME}.pdf", bbox_inches="tight")
+    plt.savefig(f"results_prompt/accuracy_vs_cost_{RUN_NAME}.pdf", bbox_inches="tight")
 
     # Second plot: Decision distribution
     plt.figure(figsize=(8, 4))
@@ -503,19 +419,20 @@ def main():
         data["decision"].value_counts(sort=False).reindex([0, 1, 2], fill_value=0)
     )
 
-    # Use the extracted colours for the bar plot
     decision_counts.plot(
-        kind="bar", color=[base_color, large_color, expert_color], alpha=0.7
+        kind="bar", 
+        color=[base_color, large_color, expert_color], 
+        alpha=0.7
     )
     plt.xticks(
         ticks=[0, 1, 2], labels=["Base Model", "Large Model", "Expert"], rotation=0
     )
     plt.ylabel("Frequency")
     plt.title("Distribution of Decisions")
-    plt.savefig(f"results/decision_distribution_{RUN_NAME}.pdf", bbox_inches="tight")
+    plt.savefig(f"results_prompt/decision_distribution_{RUN_NAME}.pdf", bbox_inches="tight")
 
     # Save data
-    data.to_csv(f"results/result_df_{RUN_NAME}.csv", index=False)
+    data.to_csv(f"results_prompt/result_df_{RUN_NAME}.csv", index=False)
 
 
 if __name__ == "__main__":
