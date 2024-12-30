@@ -16,20 +16,27 @@ def extract_predictions(response: str) -> str:
         response (str): Full response of the LLMs.
 
     Returns:
-        str: Single character response (A, B, C, D, or E) of the MC question.
+        str: Single character response (A, B, C, D, or E) of the MC question, or None if not found.
     """
     try:
+        # Patterns to match different formats of "best answer" and single letter answers
         patterns = [
             r"The best answer is: (\w)",  # "The best answer is: A"
             r"The best answer is (\w)",  # "The best answer is A"
-            r"\b([A-E])\b",  # single letter A-E
+            r"^([A-E])$",  # standalone single letter A-E
+            r"\b([A-E])\b",  # single letter A-E in a larger text
         ]
 
+        # Loop through the patterns to find a match
         for pattern in patterns:
-            match = re.search(pattern, response)
+            match = re.search(pattern, response.strip())
             if match:
-                return match.group(1)
+                letter = match.group(1)
+                # Ensure the extracted letter is A-E
+                if letter in "ABCDE":
+                    return letter
 
+        # Return None if no valid pattern is matched
         return None
     except Exception as e:
         print(f"Error while extracting prediction: {e}")

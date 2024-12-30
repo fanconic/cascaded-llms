@@ -7,22 +7,24 @@ Author: CLaudio + GPTo1
 import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import random
+from typing import Callable
 
 
 class AIDecisionSystem:
     def __init__(
         self,
-        base_model_path,
-        large_model_path,
-        uncertainty_threshold,
-        verification_fn,
-        uncertainty_fn,
-        max_input_lenght,
-        max_new_tokens,
-        base_gen_cost,
-        large_gen_cost,
-        large_inf_cost,
-        expert_cost,
+        base_model_path: str,
+        large_model_path: str,
+        uncertainty_threshold: float,
+        verification_fn: Callable,
+        uncertainty_fn: Callable,
+        max_input_lenght: int = 512,
+        max_new_tokens: int = 256,
+        base_gen_cost: float = 1.0,
+        large_gen_cost: float = 25.0,
+        large_inf_cost: float = 1.0,
+        expert_cost: float = 100.0,
+        device: str = "cpu",
     ):
 
         self.base_model_path = base_model_path
@@ -36,6 +38,7 @@ class AIDecisionSystem:
         self.large_gen_cost = large_gen_cost
         self.large_inf_cost = large_inf_cost
         self.expert_cost = expert_cost
+        self.device = device
 
         # Initialise models and tokenizers
         print("Loading Small Model")
@@ -43,7 +46,7 @@ class AIDecisionSystem:
         self.base_tokenizer.pad_token = self.base_tokenizer.eos_token
         self.base_tokenizer.padding_side = "left"
         self.base_model = AutoModelForCausalLM.from_pretrained(self.base_model_path).to(
-            "cuda:0"
+            self.device
         )
 
         print("Loading Large Model")
@@ -52,7 +55,7 @@ class AIDecisionSystem:
         self.large_tokenizer.padding_side = "left"
         self.large_model = AutoModelForCausalLM.from_pretrained(
             self.large_model_path
-        ).to("cuda:1")
+        ).to(self.device)
 
     def generate_response(self, model, tokenizer, prompts):
         inputs = tokenizer(
@@ -73,14 +76,15 @@ class AIDecisionSystem:
         ]
         return responses, inputs
 
-    def decide_batch(self, prompts):
+    def decide_batch(self, prompts, expert_responses):
         """
         Probabilistic gating:
-          1) If small-model entropy > threshold => expert (decision=2).
-          2) Else accept the small model with probability alpha = ratio / (1 + ratio).
+          1) if the small model with probability alpha = ratio / (1 + ratio).
              If not accepted => check large model's entropy.
                - If large-model entropy > threshold => expert (2)
                - else => large model (1)
+
+         2) If model entropy > threshold => expert (decision=2).
         """
         # Generate from small model & large model
         base_outputs, _ = self.generate_response(
@@ -96,7 +100,7 @@ class AIDecisionSystem:
             tokenizer=self.base_tokenizer,
             prompts=prompts,
             generated_responses=base_outputs,
-            device="cuda:2",
+            device=self.device,
             normalize_by_length=True,
         )
         large_log_probs_for_base = self.verification_fn(
@@ -104,7 +108,7 @@ class AIDecisionSystem:
             tokenizer=self.large_tokenizer,
             prompts=prompts,
             generated_responses=base_outputs,
-            device="cuda:2",
+            device=self.device,
             normalize_by_length=True,
         )
 
@@ -120,7 +124,7 @@ class AIDecisionSystem:
             tokenizer=self.base_tokenizer,
             prompts=prompts,
             generated_responses=base_outputs,
-            device="cuda:2",
+            device=self.device,
             normalize_by_length=True,
         )
         large_uncertainties = self.uncertainty_fn(
@@ -128,7 +132,7 @@ class AIDecisionSystem:
             tokenizer=self.large_tokenizer,
             prompts=prompts,
             generated_responses=large_outputs,  # The large model's own output
-            device="cuda:2",
+            device=self.device,
             normalize_by_length=True,
         )
 
@@ -160,7 +164,7 @@ class AIDecisionSystem:
                     decisions.append(
                         {
                             "decision": 2,  # Expert
-                            "response": None,
+                            "response": prompts[i] + expert_responses[i][0],
                             "base_response": base_response,
                             "large_response": large_response,
                             "base_log_probs": base_log_probs[i].item(),
@@ -194,7 +198,7 @@ class AIDecisionSystem:
                     decisions.append(
                         {
                             "decision": 2,  # Expert
-                            "response": None,
+                            "response": prompts[i] + expert_responses[i][0],
                             "base_response": base_response,
                             "large_response": large_response,
                             "base_log_probs": base_log_probs[i].item(),

@@ -262,3 +262,4 @@ def sequence_probability(
         batch_log_probs[i] = seq_log_prob_i
 
     return batch_log_probs
+

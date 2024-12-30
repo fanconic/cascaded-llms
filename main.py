@@ -49,7 +49,7 @@ def main(cfg: DictConfig):
 
     # Create a unique run directory
     now = datetime.datetime.now()
-    run_name = f"run_{now.strftime('%Y%m%d_%H%M%S')}"
+    run_name = f"run_{now.strftime('%Y%m%d_%H%M%S')}_{cfg.name_postfix}"
     run_dir = os.path.join(cfg.results_dir, run_name)
     os.makedirs(run_dir, exist_ok=True)
 
@@ -77,6 +77,7 @@ def main(cfg: DictConfig):
         large_gen_cost=cfg.large_gen_cost,
         large_inf_cost=cfg.large_inf_cost,
         expert_cost=cfg.expert_cost,
+        device=cfg.device,
     )
 
     # Initialize result placeholders
@@ -93,12 +94,9 @@ def main(cfg: DictConfig):
     all_small_predictions, all_large_predictions = [], []
 
     for batch in tqdm(dataloader):
-        prompts = [
-            f"{sample}\nPlease answer with only one of the multiple choice option in the brackets. The response should be in the format 'The best answer is: <ans>"
-            for sample in batch["input"]
-        ]
+        prompts = [f"{sample}\n{cfg.response_prompt}" for sample in batch["input"]]
         batch_decisions, small_predictions, large_predictions = (
-            decision_system.decide_batch(prompts)
+            decision_system.decide_batch(prompts, batch["output"])
         )
 
         all_small_predictions.extend(small_predictions)
