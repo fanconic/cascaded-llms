@@ -78,25 +78,33 @@ def main(cfg: DictConfig):
         large_inf_cost=cfg.large_inf_cost,
         expert_cost=cfg.expert_cost,
         device=cfg.device,
+        prompt_template=cfg.prompt_template,
     )
 
     # Initialize result placeholders
-    decisions, outputs, prob_deltas, uncerts, costs, labels, predictions = (
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-        [],
-    )
-    base_log_prob, large_log_prob = [], []
+    (
+        decisions,
+        outputs,
+        prob_deltas,
+        uncerts,
+        costs,
+        labels,
+        predictions,
+        acceptance_probs,
+        base_uncerts,
+        large_uncerts,
+    ) = ([], [], [], [], [], [], [], [], [], [])
+    base_prob, large_prob = [], []
     all_small_predictions, all_large_predictions = [], []
 
     for batch in tqdm(dataloader):
-        prompts = [f"{sample}\n{cfg.response_prompt}" for sample in batch["input"]]
+        prompts = [
+            f"{cfg.prompt_template}\n{sample}\nThe best answer is: "
+            for sample in batch["input"]
+        ]
+        questions = [f"{sample}" for sample in batch["input"]]
         batch_decisions, small_predictions, large_predictions = (
-            decision_system.decide_batch(prompts, batch["output"])
+            decision_system.decide_batch(prompts, batch["output"], questions)
         )
 
         all_small_predictions.extend(small_predictions)
@@ -107,19 +115,22 @@ def main(cfg: DictConfig):
             outputs.append(decision["response"])
             prob_deltas.append(decision["prob_delta"])
             uncerts.append(decision["uncertainty"])
+            base_uncerts.append(decision["base_uncertainty"])
+            large_uncerts.append(decision["large_uncertainty"])
             costs.append(decision["cost"])
             labels.append(batch["output"][i][0])
 
             if decision["response"] is not None:
                 pred_letter = extract_predictions(
-                    decision["response"][len(prompts[i]) :].strip()
+                    decision["response"].strip()
                 )
             else:
                 pred_letter = None
 
             predictions.append(pred_letter)
-            base_log_prob.append(decision["base_log_probs"])
-            large_log_prob.append(decision["large_log_probs"])
+            base_prob.append(decision["base_probs"])
+            large_prob.append(decision["large_probs"])
+            acceptance_probs.append(decision["acceptance_prob"])
 
     # Create DataFrame
     data = pd.DataFrame(
@@ -128,6 +139,8 @@ def main(cfg: DictConfig):
             "output": outputs,
             "prob_delta": prob_deltas,
             "uncertainty": uncerts,
+            "base_uncertainty": base_uncerts,
+            "large_uncertainty": large_uncerts,
             "label": labels,
             "prediction": predictions,
             "cost": costs,
@@ -139,8 +152,9 @@ def main(cfg: DictConfig):
             "large_prediction": [
                 extract_predictions(pred) for pred in all_large_predictions
             ],
-            "base_log_prob": base_log_prob,
-            "large_log_prob": large_log_prob,
+            "base_prob": base_prob,
+            "large_prob": large_prob,
+            "acceptance_prob": acceptance_probs,
         }
     )
 
@@ -189,7 +203,7 @@ def main(cfg: DictConfig):
     )
 
     # Save data
-    data.to_csv(os.path.join(run_dir, "results.csv"), index=False)
+    data.to_csv(os.path.join(run_dir, f"results_{cfg.name_postfix}.csv"), index=False)
 
 
 if __name__ == "__main__":

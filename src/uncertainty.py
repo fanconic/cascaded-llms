@@ -28,8 +28,8 @@ def per_token_entropy(
     prompt_lengths = []
     gen_lengths = []
 
-    for prompt, full_text in zip(prompts, generated_responses):
-        gen_resp = full_text[len(prompt) :]
+    for prompt, gen_resp in zip(prompts, generated_responses):
+        full_text = prompt + gen_resp
         prompt_ids = tokenizer(prompt, add_special_tokens=False).input_ids
         gen_ids = tokenizer(gen_resp, add_special_tokens=False).input_ids
 

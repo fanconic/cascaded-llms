@@ -17,12 +17,14 @@ def verbalisation(
     tokenizer,
     prompts,
     generated_responses,
+    questions,
     device="cuda",
     yes_token="YES",
     no_token="NO",
     max_length=512,
     max_new_tokens=2,
     normalize_by_length=None,
+    prompt_template="",
 ):
     """
     Batched version of the verbalisation approach.
@@ -43,10 +45,12 @@ def verbalisation(
     verify_prompts = []
     for question, candidate_answer in zip(prompts, generated_responses):
         text = (
+            "Given the following medical question and the model's answer, please evaluate correctness.\n"
+            f"Respond with a single token: {yes_token} or {no_token}\n"
             f"Question:\n{question}\n\n"
-            f"Candidate answer:\n{candidate_answer}\n\n"
-            "Is the candidate answer correct?\n"
-            f"Please respond with a single token: {yes_token} or {no_token}\n"
+            f"model answer:\n{candidate_answer}\n\n"
+            f"Is this answer correct: {yes_token} or {no_token}?\n"
+            "Answer: "
         )
         verify_prompts.append(text)
 
@@ -54,7 +58,7 @@ def verbalisation(
     inputs = tokenizer(
         verify_prompts,
         return_tensors="pt",
-        padding=True,
+        padding="max_length",
         truncation=True,
         max_length=max_length,
     ).to(model.device)
@@ -95,11 +99,13 @@ def surrogate_token_probs(
     tokenizer,
     prompts,
     generated_responses,
+    questions,
     device="cuda",
     yes_token="YES",
     no_token="NO",
     max_length=512,
     normalize_by_length=None,
+    prompt_template="",
 ):
     """
     Batched version of surrogate token probability approach.
@@ -117,12 +123,14 @@ def surrogate_token_probs(
 
     # Build verification prompts for each item
     verify_prompts = []
-    for question, candidate_answer in zip(prompts, generated_responses):
+    for question, candidate_answer in zip(questions, generated_responses):
         text = (
+            "Given the following medical question and the model's answer, please evaluate correctness.\n"
+            f"Respond with a single token: {yes_token} or {no_token}\n"
             f"Question:\n{question}\n\n"
-            f"Candidate answer:\n{candidate_answer}\n\n"
-            "Is the candidate answer correct?\n"
-            f"Please respond with a single token: {yes_token} or {no_token}\n"
+            f"model answer:\n{candidate_answer}\n\n"
+            f"Is this answer correct: {yes_token} or {no_token}?\n"
+            "Answer: "
         )
         verify_prompts.append(text)
 
@@ -130,10 +138,16 @@ def surrogate_token_probs(
     inputs = tokenizer(
         verify_prompts,
         return_tensors="pt",
-        padding=True,
+        padding="max_length",
         truncation=True,
         max_length=max_length,
     ).to(model.device)
+
+    # Find IDs for yes_token/no_token
+    yes_ids = tokenizer.encode(yes_token, add_special_tokens=False)
+    no_ids = tokenizer.encode(no_token, add_special_tokens=False)
+    yes_id = yes_ids[0] if yes_ids else None
+    no_id = no_ids[0] if no_ids else None
 
     # Single forward pass
     with torch.no_grad():
@@ -153,12 +167,6 @@ def surrogate_token_probs(
         # The distribution for the next token:
         next_token_logits = logits[i, seq_len_i - 1, :]  # shape [vocab_size]
         dist = F.softmax(next_token_logits, dim=-1)
-
-        # Find IDs for yes_token/no_token
-        yes_ids = tokenizer.encode(yes_token, add_special_tokens=False)
-        no_ids = tokenizer.encode(no_token, add_special_tokens=False)
-        yes_id = yes_ids[0] if yes_ids else None
-        no_id = no_ids[0] if no_ids else None
 
         p_yes = dist[yes_id].item() if yes_id is not None else 0.0
         p_no = dist[no_id].item() if no_id is not None else 0.0
@@ -180,9 +188,11 @@ def sequence_probability(
     tokenizer,
     prompts,
     generated_responses,
+    questions,
     device="cuda",
     normalize_by_length=True,
     max_length=512,
+    prompt_template="",
 ):
     """
     Computes the log probability (or average log probability) *only* over the generated
@@ -261,5 +271,4 @@ def sequence_probability(
 
         batch_log_probs[i] = seq_log_prob_i
 
-    return batch_log_probs
-
+    return torch.exp(batch_log_probs)

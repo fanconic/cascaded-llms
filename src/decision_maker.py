@@ -25,6 +25,7 @@ class AIDecisionSystem:
         large_inf_cost: float = 1.0,
         expert_cost: float = 100.0,
         device: str = "cpu",
+        prompt_template: str = "",
     ):
 
         self.base_model_path = base_model_path
@@ -39,11 +40,13 @@ class AIDecisionSystem:
         self.large_inf_cost = large_inf_cost
         self.expert_cost = expert_cost
         self.device = device
+        self.prompt_template = prompt_template
 
         # Initialise models and tokenizers
         print("Loading Small Model")
         self.base_tokenizer = AutoTokenizer.from_pretrained(self.base_model_path)
-        self.base_tokenizer.pad_token = self.base_tokenizer.eos_token
+        if self.base_tokenizer.pad_token is None:
+            self.base_tokenizer.pad_token = self.base_tokenizer.eos_token
         self.base_tokenizer.padding_side = "left"
         self.base_model = AutoModelForCausalLM.from_pretrained(self.base_model_path).to(
             self.device
@@ -51,7 +54,8 @@ class AIDecisionSystem:
 
         print("Loading Large Model")
         self.large_tokenizer = AutoTokenizer.from_pretrained(self.large_model_path)
-        self.large_tokenizer.pad_token = self.large_tokenizer.eos_token
+        if self.large_tokenizer.pad_token is None:
+            self.large_tokenizer.pad_token = self.large_tokenizer.eos_token
         self.large_tokenizer.padding_side = "left"
         self.large_model = AutoModelForCausalLM.from_pretrained(
             self.large_model_path
@@ -61,7 +65,7 @@ class AIDecisionSystem:
         inputs = tokenizer(
             prompts,
             return_tensors="pt",
-            padding=True,
+            padding="max_length",
             truncation=True,
             max_length=self.max_input_lenght,
         ).to(model.device)
@@ -72,11 +76,12 @@ class AIDecisionSystem:
                 pad_token_id=tokenizer.pad_token_id,
             )
         responses = [
-            tokenizer.decode(output, skip_special_tokens=True) for output in outputs
+            tokenizer.decode(output, skip_special_tokens=True)[len(prompt) :]
+            for output, prompt in zip(outputs, prompts)
         ]
-        return responses, inputs
+        return responses
 
-    def decide_batch(self, prompts, expert_responses):
+    def decide_batch(self, prompts, expert_responses, questions):
         """
         Probabilistic gating:
           1) if the small model with probability alpha = ratio / (1 + ratio).
@@ -87,36 +92,41 @@ class AIDecisionSystem:
          2) If model entropy > threshold => expert (decision=2).
         """
         # Generate from small model & large model
-        base_outputs, _ = self.generate_response(
+        base_outputs = self.generate_response(
             self.base_model, self.base_tokenizer, prompts
         )
-        large_outputs, _ = self.generate_response(
+        large_outputs = self.generate_response(
             self.large_model, self.large_tokenizer, prompts
         )
 
         # 1. Compute log probs for the small model & the large model verifying the small model's text
-        base_log_probs = self.verification_fn(
+        base_probs = self.verification_fn(
             model=self.base_model,
             tokenizer=self.base_tokenizer,
             prompts=prompts,
+            questions=questions,
             generated_responses=base_outputs,
             device=self.device,
             normalize_by_length=True,
+            prompt_template=self.prompt_template,
         )
-        large_log_probs_for_base = self.verification_fn(
+        large_probs_for_base = self.verification_fn(
             model=self.large_model,
             tokenizer=self.large_tokenizer,
             prompts=prompts,
+            questions=questions,
             generated_responses=base_outputs,
             device=self.device,
             normalize_by_length=True,
+            prompt_template=self.prompt_template,
         )
 
         # 2. Compute ratio & acceptance probability
-        difference = large_log_probs_for_base - base_log_probs
-        ratio = torch.exp(difference)  # ratio = p_large / p_small
+        M = 1
+        ratio = large_probs_for_base / (base_probs * M)
+        # ratio = torch.exp(difference)  # ratio = p_large / p_small
         # We define acceptance_prob = ratio / (1 + ratio)
-        acceptance_prob = ratio / (1.0 + ratio)
+        acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)  # ratio / (1.0 + ratio)
 
         # 3. Compute entropies to gauge uncertainty
         base_uncertainties = self.uncertainty_fn(
@@ -143,8 +153,8 @@ class AIDecisionSystem:
         for i, prompt in enumerate(prompts):
             base_response = base_outputs[i]
             large_response = large_outputs[i]
-            base_answer = base_response[len(prompt) :].strip()
-            large_answer = large_response[len(prompt) :].strip()
+            base_answer = base_response.strip()
+            large_answer = large_response.strip()
 
             # We'll read off the ratio-based acceptance probability
             alpha_i = acceptance_prob[i].item()
@@ -164,16 +174,19 @@ class AIDecisionSystem:
                     decisions.append(
                         {
                             "decision": 2,  # Expert
-                            "response": prompts[i] + expert_responses[i][0],
+                            "response": expert_responses[i][0],
                             "base_response": base_response,
                             "large_response": large_response,
-                            "base_log_probs": base_log_probs[i].item(),
-                            "large_log_probs": large_log_probs_for_base[i].item(),
+                            "base_probs": base_probs[i].item(),
+                            "large_probs": large_probs_for_base[i].item(),
                             "prob_delta": ratio[i].item(),
                             "uncertainty": small_uncert,
+                            "base_uncertainty": small_uncert,
+                            "large_uncertainty": big_uncert,
                             "cost": self.base_gen_cost
                             + self.large_inf_cost
                             + self.expert_cost,
+                            "acceptance_prob": alpha_i,
                         }
                     )
 
@@ -185,11 +198,14 @@ class AIDecisionSystem:
                             "response": base_response,
                             "base_response": base_response,
                             "large_response": large_response,
-                            "base_log_probs": base_log_probs[i].item(),
-                            "large_log_probs": large_log_probs_for_base[i].item(),
+                            "base_probs": base_probs[i].item(),
+                            "large_probs": large_probs_for_base[i].item(),
                             "prob_delta": ratio[i].item(),
                             "uncertainty": small_uncert,
+                            "base_uncertainty": small_uncert,
+                            "large_uncertainty": big_uncert,
                             "cost": self.base_gen_cost + self.large_inf_cost,
+                            "acceptance_prob": alpha_i,
                         }
                     )
             else:
@@ -198,17 +214,20 @@ class AIDecisionSystem:
                     decisions.append(
                         {
                             "decision": 2,  # Expert
-                            "response": prompts[i] + expert_responses[i][0],
+                            "response": expert_responses[i][0],
                             "base_response": base_response,
                             "large_response": large_response,
-                            "base_log_probs": base_log_probs[i].item(),
-                            "large_log_probs": large_log_probs_for_base[i].item(),
+                            "base_probs": base_probs[i].item(),
+                            "large_probs": large_probs_for_base[i].item(),
                             "prob_delta": ratio[i].item(),
                             "uncertainty": big_uncert,
+                            "base_uncertainty": small_uncert,
+                            "large_uncertainty": big_uncert,
                             "cost": self.base_gen_cost
                             + self.large_inf_cost
                             + self.large_gen_cost
                             + self.expert_cost,
+                            "acceptance_prob": alpha_i,
                         }
                     )
                 else:
@@ -219,13 +238,16 @@ class AIDecisionSystem:
                             "response": large_response,
                             "base_response": base_response,
                             "large_response": large_response,
-                            "base_log_probs": base_log_probs[i].item(),
-                            "large_log_probs": large_log_probs_for_base[i].item(),
+                            "base_probs": base_probs[i].item(),
+                            "large_probs": large_probs_for_base[i].item(),
                             "prob_delta": ratio[i].item(),
                             "uncertainty": big_uncert,
+                            "base_uncertainty": small_uncert,
+                            "large_uncertainty": big_uncert,
                             "cost": self.base_gen_cost
                             + self.large_inf_cost
                             + self.large_gen_cost,
+                            "acceptance_prob": alpha_i,
                         }
                     )
 
