@@ -17,5 +17,6 @@ num_samples: 1000
 verification_fn: surrogate_token_probs
 uncertainty_fn: per_token_entropy
 prompt_template: 'Please answer with only one of the multiple choice option in the brackets.'
+dataset: medalpaca/medical_meadow_medqa
 device: cuda:0
 name_postfix: llama_3_8_b

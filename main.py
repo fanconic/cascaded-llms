@@ -13,6 +13,7 @@ from omegaconf import DictConfig, OmegaConf
 from src.decision_maker import AIDecisionSystem
 from src.uncertainty import per_token_entropy
 from src.verification import verbalisation, sequence_probability, surrogate_token_probs
+from src.online_sft import OnlineSFTTrainerLoRA
 from src.utils import (
     extract_predictions,
     plot_accuracy_vs_cost,
@@ -59,9 +60,7 @@ def main(cfg: DictConfig):
         OmegaConf.save(config=cfg, f=f)
 
     # Load dataset
-    dataset = load_dataset(
-        "medalpaca/medical_meadow_medqa", split=f"train[:{cfg.num_samples}]"
-    )
+    dataset = load_dataset(cfg.dataset, split=f"train[:{cfg.num_samples}]")
     dataloader = DataLoader(dataset, batch_size=cfg.batch_size, shuffle=False)
 
     # Initialize decision system
@@ -81,11 +80,34 @@ def main(cfg: DictConfig):
         prompt_template=cfg.prompt_template,
     )
 
+    # Initialize the SFT trainer (example parameters)
+    sft_trainer_base = OnlineSFTTrainerLoRA(
+        base_model=decision_system.base_model,  # The underlying base model from AIDecisionSystem
+        learning_rate=cfg.sft.learning_rate,
+        max_buffer_size=cfg.sft.buffer_size,
+        tokenizer_name=decision_system.base_tokenizer,  # or a specific tokenizer path if needed
+        lora_r=cfg.sft.lora_r,
+        lora_alpha=cfg.sft.lora_alpha,
+        lora_dropout=cfg.sft.lora_dropout,
+        output_dir=os.path.join(run_dir, "base_lora_adapters"),  # save location
+    )
+
+    sft_trainer_large = OnlineSFTTrainerLoRA(
+        base_model=decision_system.large_model,  # The underlying base model from AIDecisionSystem
+        learning_rate=cfg.sft.learning_rate,
+        max_buffer_size=cfg.sft.buffer_size,
+        tokenizer_name=decision_system.large_tokenizer,  # or a specific tokenizer path if needed
+        lora_r=cfg.sft.lora_r,
+        lora_alpha=cfg.sft.lora_alpha,
+        lora_dropout=cfg.sft.lora_dropout,
+        output_dir=os.path.join(run_dir, "large_lora_adapters"),  # save location
+    )
+
     # Initialize result placeholders
     (
         decisions,
         outputs,
-        prob_deltas,
+        acceptance_ratios,
         uncerts,
         costs,
         labels,
@@ -113,31 +135,59 @@ def main(cfg: DictConfig):
         for i, decision in enumerate(batch_decisions):
             decisions.append(decision["decision"])
             outputs.append(decision["response"])
-            prob_deltas.append(decision["prob_delta"])
+            acceptance_ratios.append(decision["acceptance_ratio"])
             uncerts.append(decision["uncertainty"])
             base_uncerts.append(decision["base_uncertainty"])
             large_uncerts.append(decision["large_uncertainty"])
             costs.append(decision["cost"])
             labels.append(batch["output"][i][0])
 
+            # Evaluate final predicted letter
             if decision["response"] is not None:
-                pred_letter = extract_predictions(
-                    decision["response"].strip()
-                )
+                pred_letter = extract_predictions(decision["response"].strip())
             else:
                 pred_letter = None
-
             predictions.append(pred_letter)
+
             base_prob.append(decision["base_probs"])
             large_prob.append(decision["large_probs"])
             acceptance_probs.append(decision["acceptance_prob"])
+
+            # ============== ONLINE SFT LOGIC ==============
+            # 1. If final decision used the "Large Model" response, add that as a pseudo-label for the base model
+            if decision["decision"] == 1:
+                # 'small_predictions[i]' is what the base model said, 'large_predictions[i]' is what the large model said
+                # We treat 'large_predictions[i]' as the pseudo-label for the original prompt
+                sft_trainer_base.add_example(
+                    prompt_text=prompts[i],
+                    label_text=large_predictions[i],  # pseudo-label from large model
+                    pseudo_label_weight=acceptance_ratios[i],
+                )
+
+            # 2. If final decision used the "Expert" path, store the ground-truth label for the base and large model
+            elif decision["decision"] == 2:
+                # We treat batch["output"][i][0] as the ground-truth label for the original prompt
+                sft_trainer_base.add_example(
+                    prompt_text=prompts[i],
+                    label_text=batch["output"][i][0],  # ground-truth
+                )
+
+                sft_trainer_large.add_example(
+                    prompt_text=prompts[i],
+                    label_text=batch["output"][i][0],  # ground-truth
+                )
+            # =========== END OF ONLINE SFT LOGIC ===========
+
+    # After the loop, optionally finalize the SFT to use remaining buffer
+    sft_trainer_base.finalize()
+    sft_trainer_large.finalize()
 
     # Create DataFrame
     data = pd.DataFrame(
         {
             "decision": decisions,
             "output": outputs,
-            "prob_delta": prob_deltas,
+            "acceptance_ratio": acceptance_ratios,
             "uncertainty": uncerts,
             "base_uncertainty": base_uncerts,
             "large_uncertainty": large_uncerts,
