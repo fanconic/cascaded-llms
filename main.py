@@ -81,27 +81,28 @@ def main(cfg: DictConfig):
     )
 
     # Initialize the SFT trainer (example parameters)
-    sft_trainer_base = OnlineSFTTrainerLoRA(
-        base_model=decision_system.base_model,  # The underlying base model from AIDecisionSystem
-        learning_rate=cfg.sft.learning_rate,
-        max_buffer_size=cfg.sft.buffer_size,
-        tokenizer_name=decision_system.base_tokenizer,  # or a specific tokenizer path if needed
-        lora_r=cfg.sft.lora_r,
-        lora_alpha=cfg.sft.lora_alpha,
-        lora_dropout=cfg.sft.lora_dropout,
-        output_dir=os.path.join(run_dir, "base_lora_adapters"),  # save location
-    )
+    if cfg.sft.enable:
+        sft_trainer_base = OnlineSFTTrainerLoRA(
+            base_model=decision_system.base_model,  # The underlying base model from AIDecisionSystem
+            learning_rate=cfg.sft.learning_rate,
+            max_buffer_size=cfg.sft.buffer_size,
+            tokenizer_name=decision_system.base_tokenizer,  # or a specific tokenizer path if needed
+            lora_r=cfg.sft.lora_r,
+            lora_alpha=cfg.sft.lora_alpha,
+            lora_dropout=cfg.sft.lora_dropout,
+            output_dir=os.path.join(run_dir, "base_lora_adapters"),  # save location
+        )
 
-    sft_trainer_large = OnlineSFTTrainerLoRA(
-        base_model=decision_system.large_model,  # The underlying base model from AIDecisionSystem
-        learning_rate=cfg.sft.learning_rate,
-        max_buffer_size=cfg.sft.buffer_size,
-        tokenizer_name=decision_system.large_tokenizer,  # or a specific tokenizer path if needed
-        lora_r=cfg.sft.lora_r,
-        lora_alpha=cfg.sft.lora_alpha,
-        lora_dropout=cfg.sft.lora_dropout,
-        output_dir=os.path.join(run_dir, "large_lora_adapters"),  # save location
-    )
+        sft_trainer_large = OnlineSFTTrainerLoRA(
+            base_model=decision_system.large_model,  # The underlying base model from AIDecisionSystem
+            learning_rate=cfg.sft.learning_rate,
+            max_buffer_size=cfg.sft.buffer_size,
+            tokenizer_name=decision_system.large_tokenizer,  # or a specific tokenizer path if needed
+            lora_r=cfg.sft.lora_r,
+            lora_alpha=cfg.sft.lora_alpha,
+            lora_dropout=cfg.sft.lora_dropout,
+            output_dir=os.path.join(run_dir, "large_lora_adapters"),  # save location
+        )
 
     # Initialize result placeholders
     (
@@ -153,34 +154,33 @@ def main(cfg: DictConfig):
             large_prob.append(decision["large_probs"])
             acceptance_probs.append(decision["acceptance_prob"])
 
-            # ============== ONLINE SFT LOGIC ==============
-            # 1. If final decision used the "Large Model" response, add that as a pseudo-label for the base model
-            if decision["decision"] == 1:
-                # 'small_predictions[i]' is what the base model said, 'large_predictions[i]' is what the large model said
-                # We treat 'large_predictions[i]' as the pseudo-label for the original prompt
-                sft_trainer_base.add_example(
-                    prompt_text=prompts[i],
-                    label_text=large_predictions[i],  # pseudo-label from large model
-                    pseudo_label_weight=acceptance_ratios[i],
-                )
+            if cfg.sft.enable:
+                # 1. If final decision used the large model response, add that as a pseudo-label for the base model
+                if decision["decision"] == 1:
+                    sft_trainer_base.add_example(
+                        prompt_text=prompts[i],
+                        label_text=large_predictions[
+                            i
+                        ],  # pseudo-label from large model
+                        pseudo_label_weight=acceptance_ratios[i],
+                    )
 
-            # 2. If final decision used the "Expert" path, store the ground-truth label for the base and large model
-            elif decision["decision"] == 2:
-                # We treat batch["output"][i][0] as the ground-truth label for the original prompt
-                sft_trainer_base.add_example(
-                    prompt_text=prompts[i],
-                    label_text=batch["output"][i][0],  # ground-truth
-                )
+                # 2. If final decision used the expert path, store the ground-truth label for the base and large model
+                elif decision["decision"] == 2:
+                    sft_trainer_base.add_example(
+                        prompt_text=prompts[i],
+                        label_text=batch["output"][i][0],  # ground-truth
+                    )
 
-                sft_trainer_large.add_example(
-                    prompt_text=prompts[i],
-                    label_text=batch["output"][i][0],  # ground-truth
-                )
-            # =========== END OF ONLINE SFT LOGIC ===========
+                    sft_trainer_large.add_example(
+                        prompt_text=prompts[i],
+                        label_text=batch["output"][i][0],  # ground-truth
+                    )
 
     # After the loop, optionally finalize the SFT to use remaining buffer
-    sft_trainer_base.finalize()
-    sft_trainer_large.finalize()
+    if cfg.sft.enable:
+        sft_trainer_base.finalize()
+        sft_trainer_large.finalize()
 
     # Create DataFrame
     data = pd.DataFrame(
