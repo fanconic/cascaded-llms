@@ -22,7 +22,7 @@ class Experiment:
     def __init__(self, cfg: DictConfig):
         self.cfg = cfg
         self.run_dir = self._setup_run_directory()
-        self.dataset = self._load_dataset()
+        self.dataset, self.dataset_length = self._load_dataset()
 
         exp_config = ExperimentConfig(
             base_model=cfg.base_model,
@@ -59,11 +59,11 @@ class Experiment:
             OmegaConf.save(config=self.cfg, f=f)
         return run_dir
 
-    def _load_dataset(self) -> DataLoader:
+    def _load_dataset(self) -> Tuple[DataLoader, int]:
         dataset = load_dataset(
             self.cfg.dataset, split=f"train[:{self.cfg.num_samples}]"
         )
-        return DataLoader(dataset, batch_size=self.cfg.batch_size, shuffle=False)
+        return DataLoader(dataset, batch_size=self.cfg.batch_size, shuffle=False), len(dataset) 
 
     def _initialize_sft(self) -> Tuple[OnlineSFTTrainerLoRA, OnlineSFTTrainerLoRA]:
         base_trainer = OnlineSFTTrainerLoRA(
@@ -206,7 +206,7 @@ class Experiment:
 
     def _analyze_and_save_results(self, results: Dict):
         data = pd.DataFrame(self._create_dataframe_dict(results))
-        self._calculate_and_plot_metrics(data, len(self.dataset))
+        self._calculate_and_plot_metrics(data)
         data.to_csv(
             os.path.join(self.run_dir, f"results_{self.cfg.name_postfix}.csv"),
             index=False,
@@ -237,8 +237,8 @@ class Experiment:
         )
 
         # Calculate costs
-        cost_base = dataset_length * self.cfg.base_gen_cost
-        cost_large = dataset_length * self.cfg.large_gen_cost
+        cost_base = self.dataset_length * self.cfg.base_gen_cost
+        cost_large = self.dataset_length * self.cfg.large_gen_cost
 
         # Calculate dynamic system metrics
         data["correct"] = (data["prediction"] == data["label"]).astype(int)

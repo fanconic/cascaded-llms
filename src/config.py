@@ -27,11 +27,10 @@ class ModelConfig:
 class CostConfig:
     """Configuration for different operation costs."""
 
-    base_gen_cost: float = 1.0
-    large_gen_cost: float = 25.0
-    large_inf_cost: float = 1.0
-    expert_cost: float = 100.0
-    error_penalty: float = 10.0
+    base_gen_cost: float
+    large_gen_cost: float
+    large_inf_cost: float
+    expert_cost: float
 
 
 @dataclass
@@ -60,6 +59,6 @@ class OnlineConfig:
     initial_uncertainty_threshold_base: float
     initial_uncertainty_threshold_large: float
     initial_M: float
-    lr_tau: float = 0.01
-    lr_M: float = 0.01
-    error_penalty: float = 10.0
+    lr_tau: float
+    lr_M: float
+    error_penalty: float

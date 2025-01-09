@@ -59,7 +59,7 @@ def plot_accuracy_vs_cost(
     dynamic_accuracy,
     dynamic_accuracy_err,
 ):
-    plt.figure(figsize=(10, 5))
+    plt.figure(figsize=(5, 5))
 
     base_plot = plt.errorbar(
         cost_base,
