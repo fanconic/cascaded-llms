@@ -33,7 +33,6 @@ class DecisionMakerFactory:
 
         cost_config_obj = CostConfig(**cost_config)
 
-
         online_config_obj = OnlineConfig(
             enable=online_config.enable,
             initial_uncertainty_threshold_base=online_config.initial_uncertainty_threshold_base,
@@ -43,7 +42,6 @@ class DecisionMakerFactory:
             lr_M=online_config.lr_M,
             error_penalty=online_config.error_penalty,
         )
-   
 
         return AIDecisionSystem(
             base_model_path=exp_config.base_model,

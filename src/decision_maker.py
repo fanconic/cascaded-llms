@@ -51,11 +51,13 @@ class AIDecisionSystem:
         self.costs = cost_config
 
         # Online learning parameters
+        self.online_enable = online_config.enable
         self.tau_base = online_config.initial_uncertainty_threshold_base
         self.tau_large = online_config.initial_uncertainty_threshold_large
         self.M = online_config.initial_M
         self.lr_tau = online_config.lr_tau
         self.lr_M = online_config.lr_M
+        self.error_penalty = online_config.error_penalty
 
         # Store functions
         self.verification_fn = verification_fn
@@ -73,7 +75,7 @@ class AIDecisionSystem:
         self, model_path: str, model_name: str
     ) -> Tuple[PreTrainedModel, PreTrainedTokenizer]:
         """Initialize a model and its tokenizer."""
-        print(f"Loading {model_name} Model")
+        print(f"Loading {model_name} Model: {model_path}")
         tokenizer = AutoTokenizer.from_pretrained(model_path)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token
@@ -174,13 +176,13 @@ class AIDecisionSystem:
                     self.costs.base_gen_cost
                     + self.costs.large_inf_cost
                     + self.costs.expert_cost,
-                    base_uncert
+                    base_uncert,
                 )
             return (
                 0,
                 base_response,
                 self.costs.base_gen_cost + self.costs.large_inf_cost,
-                base_uncert
+                base_uncert,
             )
         else:
             if large_uncert > self.tau_large:
@@ -191,7 +193,7 @@ class AIDecisionSystem:
                     + self.costs.large_inf_cost
                     + self.costs.large_gen_cost
                     + self.costs.expert_cost,
-                    large_uncert
+                    large_uncert,
                 )
             return (
                 1,
@@ -199,7 +201,7 @@ class AIDecisionSystem:
                 self.costs.base_gen_cost
                 + self.costs.large_inf_cost
                 + self.costs.large_gen_cost,
-                large_uncert
+                large_uncert,
             )
 
     def _update_parameters(self, decision: int, is_correct: bool) -> None:
@@ -263,8 +265,8 @@ class AIDecisionSystem:
             )
 
             is_correct = None
-            if gold_labels is not None:
-                is_correct = final_answer.strip() == gold_labels[i].strip()
+            if self.online_enable:
+                is_correct = final_answer.strip() == expert_responses[i][0].strip()
                 self._update_parameters(decision, is_correct)
 
             decisions.append(

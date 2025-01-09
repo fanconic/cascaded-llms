@@ -97,7 +97,7 @@ def plot_accuracy_vs_cost(
         alpha=0.7,
     )
 
-    plt.xlabel("Cumulative Cost")
+    plt.xlabel("Total Cost")
     plt.ylabel("Accuracy")
     plt.title("Accuracy vs Cost Curve")
     plt.legend()
@@ -105,7 +105,7 @@ def plot_accuracy_vs_cost(
 
 
 def plot_decision_distribution(run_dir, decisions, labels):
-    plt.figure(figsize=(8, 4))
+    plt.figure(figsize=(5, 5))
     decision_counts = decisions.value_counts(sort=False).reindex(
         range(len(labels)), fill_value=0
     )
@@ -114,6 +114,20 @@ def plot_decision_distribution(run_dir, decisions, labels):
     plt.ylabel("Frequency")
     plt.title("Distribution of Decisions")
     plt.savefig(os.path.join(run_dir, "decision_distribution.pdf"), bbox_inches="tight")
+    
+
+def plot_tau_M(run_dir, decisions):
+    plt.figure(figsize=(5, 5))
+    
+    # Option 1: Rename columns before plotting
+    decisions_renamed = decisions.copy()
+    decisions_renamed.columns = [r'$\tau_{\text{base}}$', r'$\tau_{\text{large}}$', '$M$']
+    decisions_renamed.plot(kind="line")
+    
+    plt.xlabel("Online time steps (t)")
+    plt.ylabel("Value")
+    plt.title("Development of Parameters")
+    plt.savefig(os.path.join(run_dir, "tau_M_development.pdf"), bbox_inches="tight")
 
 
 def set_seed(seed):
