@@ -14,7 +14,7 @@ uncertainty_threshold: 2.0
 batch_size: 7
 max_input_length: 512
 sft:
-  enable: true
+  enable: false
   learning_rate: 1e-4
   buffer_size: 1
   lora_r: 32
