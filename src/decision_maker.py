@@ -1,97 +1,236 @@
 """
-This script implements the Human-AI decision making system
+Human-AI Decision Making System with Online Learning
 
-Author: CLaudio + GPTo1
+This module implements a decision-making system that combines small and large language models
+with human expert oversight and online parameter adaptation.
 """
 
-import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
 import random
-from typing import Callable
+from typing import Callable, List, Dict, Tuple, Any, Optional
+
+import torch
+from torch import Tensor
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    PreTrainedModel,
+    PreTrainedTokenizer,
+)
+from src.config import ModelConfig, CostConfig, OnlineConfig
 
 
 class AIDecisionSystem:
+    """A system that combines small and large language models with human expertise and online learning."""
+
     def __init__(
         self,
         base_model_path: str,
         large_model_path: str,
-        uncertainty_threshold: float,
-        verification_fn: Callable,
-        uncertainty_fn: Callable,
-        max_input_lenght: int = 512,
-        max_new_tokens: int = 256,
-        base_gen_cost: float = 1.0,
-        large_gen_cost: float = 25.0,
-        large_inf_cost: float = 1.0,
-        expert_cost: float = 100.0,
-        device: str = "cpu",
-        prompt_template: str = "",
+        verification_fn: Callable[
+            [
+                PreTrainedModel,
+                PreTrainedTokenizer,
+                List[str],
+                List[str],
+                List[str],
+                str,
+                bool,
+                str,
+            ],
+            Tensor,
+        ],
+        uncertainty_fn: Callable[
+            [PreTrainedModel, PreTrainedTokenizer, List[str], List[str], str, bool],
+            Tensor,
+        ],
+        model_config: ModelConfig,
+        cost_config: CostConfig,
+        online_config: OnlineConfig,
     ):
+        self.config = model_config
+        self.costs = cost_config
 
-        self.base_model_path = base_model_path
-        self.large_model_path = large_model_path
-        self.uncertainty_threshold = uncertainty_threshold
+        # Online learning parameters
+        self.tau_base = online_config.initial_uncertainty_threshold_base
+        self.tau_large = online_config.initial_uncertainty_threshold_large
+        self.M = online_config.initial_M
+        self.lr_tau = online_config.lr_tau
+        self.lr_M = online_config.lr_M
+
+        # Store functions
         self.verification_fn = verification_fn
         self.uncertainty_fn = uncertainty_fn
-        self.max_input_lenght = max_input_lenght
-        self.max_new_tokens = max_new_tokens
-        self.base_gen_cost = base_gen_cost
-        self.large_gen_cost = large_gen_cost
-        self.large_inf_cost = large_inf_cost
-        self.expert_cost = expert_cost
-        self.device = device
-        self.prompt_template = prompt_template
 
-        # Initialise models and tokenizers
-        print("Loading Small Model")
-        self.base_tokenizer = AutoTokenizer.from_pretrained(self.base_model_path)
-        if self.base_tokenizer.pad_token is None:
-            self.base_tokenizer.pad_token = self.base_tokenizer.eos_token
-        self.base_tokenizer.padding_side = "left"
-        self.base_model = AutoModelForCausalLM.from_pretrained(self.base_model_path).to(
-            self.device
+        # Initialize models
+        self.base_model, self.base_tokenizer = self._initialize_model(
+            base_model_path, "Small"
+        )
+        self.large_model, self.large_tokenizer = self._initialize_model(
+            large_model_path, "Large"
         )
 
-        print("Loading Large Model")
-        self.large_tokenizer = AutoTokenizer.from_pretrained(self.large_model_path)
-        if self.large_tokenizer.pad_token is None:
-            self.large_tokenizer.pad_token = self.large_tokenizer.eos_token
-        self.large_tokenizer.padding_side = "left"
-        self.large_model = AutoModelForCausalLM.from_pretrained(
-            self.large_model_path
-        ).to(self.device)
+    def _initialize_model(
+        self, model_path: str, model_name: str
+    ) -> Tuple[PreTrainedModel, PreTrainedTokenizer]:
+        """Initialize a model and its tokenizer."""
+        print(f"Loading {model_name} Model")
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.padding_side = "left"
 
-    def generate_response(self, model, tokenizer, prompts):
+        model = AutoModelForCausalLM.from_pretrained(model_path).to(self.config.device)
+        return model, tokenizer
+
+    def generate_response(
+        self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, prompts: List[str]
+    ) -> List[str]:
+        """Generate responses for given prompts using the specified model."""
         inputs = tokenizer(
             prompts,
             return_tensors="pt",
             padding="max_length",
             truncation=True,
-            max_length=self.max_input_lenght,
+            max_length=self.config.max_input_length,
         ).to(model.device)
+
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
-                max_new_tokens=self.max_new_tokens,
+                max_new_tokens=self.config.max_new_tokens,
                 pad_token_id=tokenizer.pad_token_id,
             )
-        responses = [
+
+        return [
             tokenizer.decode(output, skip_special_tokens=True)[len(prompt) :]
             for output, prompt in zip(outputs, prompts)
         ]
-        return responses
 
-    def decide_batch(self, prompts, expert_responses, questions):
-        """
-        Probabilistic gating:
-          1) if the small model with probability alpha = ratio / (1 + ratio).
-             If not accepted => check large model's entropy.
-               - If large-model entropy > threshold => expert (2)
-               - else => large model (1)
+    def _evaluate_models(
+        self,
+        prompts: List[str],
+        questions: List[str],
+        base_outputs: List[str],
+        large_outputs: List[str],
+    ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+        """Evaluate model outputs and compute probabilities and uncertainties."""
+        base_probs = self.verification_fn(
+            model=self.base_model,
+            tokenizer=self.base_tokenizer,
+            prompts=prompts,
+            questions=questions,
+            generated_responses=base_outputs,
+            device=self.config.device,
+            normalize_by_length=True,
+            prompt_template=self.config.prompt_template,
+        )
 
-         2) If model entropy > threshold => expert (decision=2).
-        """
-        # Generate from small model & large model
+        large_probs_for_base = self.verification_fn(
+            model=self.large_model,
+            tokenizer=self.large_tokenizer,
+            prompts=prompts,
+            questions=questions,
+            generated_responses=base_outputs,
+            device=self.config.device,
+            normalize_by_length=True,
+            prompt_template=self.config.prompt_template,
+        )
+
+        base_uncertainties = self.uncertainty_fn(
+            model=self.base_model,
+            tokenizer=self.base_tokenizer,
+            prompts=prompts,
+            generated_responses=base_outputs,
+            device=self.config.device,
+            normalize_by_length=True,
+        )
+
+        large_uncertainties = self.uncertainty_fn(
+            model=self.large_model,
+            tokenizer=self.large_tokenizer,
+            prompts=prompts,
+            generated_responses=large_outputs,
+            device=self.config.device,
+            normalize_by_length=True,
+        )
+
+        return base_probs, large_probs_for_base, base_uncertainties, large_uncertainties
+
+    def _make_decision(
+        self,
+        acceptance_prob: float,
+        base_uncert: float,
+        large_uncert: float,
+        base_response: str,
+        large_response: str,
+        expert_response: str,
+    ) -> Tuple[int, str, float]:
+        """Make a decision for a single prompt."""
+        if random.random() < acceptance_prob:
+            if base_uncert > self.tau_base:
+                return (
+                    2,
+                    expert_response,
+                    self.costs.base_gen_cost
+                    + self.costs.large_inf_cost
+                    + self.costs.expert_cost,
+                    base_uncert
+                )
+            return (
+                0,
+                base_response,
+                self.costs.base_gen_cost + self.costs.large_inf_cost,
+                base_uncert
+            )
+        else:
+            if large_uncert > self.tau_large:
+                return (
+                    2,
+                    expert_response,
+                    self.costs.base_gen_cost
+                    + self.costs.large_inf_cost
+                    + self.costs.large_gen_cost
+                    + self.costs.expert_cost,
+                    large_uncert
+                )
+            return (
+                1,
+                large_response,
+                self.costs.base_gen_cost
+                + self.costs.large_inf_cost
+                + self.costs.large_gen_cost,
+                large_uncert
+            )
+
+    def _update_parameters(self, decision: int, is_correct: bool) -> None:
+        """Update M and tau parameters based on decision outcome."""
+        dM = 0.0
+        dTau = 0.0
+
+        if decision == 0:  # used small model
+            if not is_correct:
+                dM -= 1.0
+                dTau -= 0.5
+        elif decision == 1:  # used large model
+            if is_correct:
+                dM += 0.5
+            else:
+                dTau -= 1.0
+        elif decision == 2:  # expert
+            dTau -= 0.1
+
+        self.M = max(1e-3, self.M - self.lr_M * dM)
+        self.tau_base = max(0.0, self.tau_base - self.lr_tau * dTau)
+        self.tau_large = max(0.0, self.tau_large - self.lr_tau * dTau)
+
+    def decide_batch(
+        self,
+        prompts: List[str],
+        expert_responses: List[List[str]],
+        questions: List[str],
+        gold_labels: Optional[List[str]] = None,
+    ) -> Tuple[List[Dict[str, Any]], List[str], List[str]]:
+        """Process a batch of prompts and make decisions with optional online learning."""
         base_outputs = self.generate_response(
             self.base_model, self.base_tokenizer, prompts
         )
@@ -99,156 +238,56 @@ class AIDecisionSystem:
             self.large_model, self.large_tokenizer, prompts
         )
 
-        # 1. Compute log probs for the small model & the large model verifying the small model's text
-        base_probs = self.verification_fn(
-            model=self.base_model,
-            tokenizer=self.base_tokenizer,
-            prompts=prompts,
-            questions=questions,
-            generated_responses=base_outputs,
-            device=self.device,
-            normalize_by_length=True,
-            prompt_template=self.prompt_template,
-        )
-        large_probs_for_base = self.verification_fn(
-            model=self.large_model,
-            tokenizer=self.large_tokenizer,
-            prompts=prompts,
-            questions=questions,
-            generated_responses=base_outputs,
-            device=self.device,
-            normalize_by_length=True,
-            prompt_template=self.prompt_template,
+        base_probs, large_probs_for_base, base_uncertainties, large_uncertainties = (
+            self._evaluate_models(prompts, questions, base_outputs, large_outputs)
         )
 
-        # 2. Compute ratio & acceptance probability
-        M = 1
-        ratio = large_probs_for_base / (base_probs * M)
-        # ratio = torch.exp(difference)  # ratio = p_large / p_small
-        # We define acceptance_prob = ratio / (1 + ratio)
-        acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)  # ratio / (1.0 + ratio)
-
-        # 3. Compute entropies to gauge uncertainty
-        base_uncertainties = self.uncertainty_fn(
-            model=self.base_model,
-            tokenizer=self.base_tokenizer,
-            prompts=prompts,
-            generated_responses=base_outputs,
-            device=self.device,
-            normalize_by_length=True,
-        )
-        large_uncertainties = self.uncertainty_fn(
-            model=self.large_model,
-            tokenizer=self.large_tokenizer,
-            prompts=prompts,
-            generated_responses=large_outputs,  # The large model's own output
-            device=self.device,
-            normalize_by_length=True,
-        )
+        ratio = large_probs_for_base / (base_probs * self.M)
+        acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)
 
         decisions = []
-        small_model_predictions = []
+        base_model_predictions = []
         large_model_predictions = []
 
-        for i, prompt in enumerate(prompts):
-            base_response = base_outputs[i]
-            large_response = large_outputs[i]
-            base_answer = base_response.strip()
-            large_answer = large_response.strip()
+        for i, _ in enumerate(prompts):
+            base_response = base_outputs[i].strip()
+            large_response = large_outputs[i].strip()
 
-            # We'll read off the ratio-based acceptance probability
-            alpha_i = acceptance_prob[i].item()
+            decision, final_answer, cost, uncertainty = self._make_decision(
+                acceptance_prob[i].item(),
+                base_uncertainties[i].item(),
+                large_uncertainties[i].item(),
+                base_response,
+                large_response,
+                expert_responses[i][0],
+            )
 
-            # Uncertainties
-            small_uncert = base_uncertainties[i].item()
-            big_uncert = large_uncertainties[i].item()
+            is_correct = None
+            if gold_labels is not None:
+                is_correct = final_answer.strip() == gold_labels[i].strip()
+                self._update_parameters(decision, is_correct)
 
-            small_model_predictions.append(base_answer)
-            large_model_predictions.append(large_answer)
+            decisions.append(
+                {
+                    "decision": decision,
+                    "response": final_answer,
+                    "cost": cost,
+                    "is_correct": is_correct,
+                    "base_response": base_response,
+                    "large_response": large_response,
+                    "uncertainty": uncertainty,
+                    "base_uncertainty": base_uncertainties[i].item(),
+                    "large_uncertainty": large_uncertainties[i].item(),
+                    "acceptance_prob": acceptance_prob[i].item(),
+                    "base_probs": base_probs[i].item(),
+                    "large_probs": large_probs_for_base[i].item(),
+                    "tau_base": self.tau_base,
+                    "tau_large": self.tau_large,
+                    "M": self.M,
+                }
+            )
 
-            # Probabilistic acceptance
-            u = random.random()  # uniform(0,1)
-            if u < alpha_i:
-                # If small model is too uncertain => send to expert
-                if small_uncert > self.uncertainty_threshold:
-                    decisions.append(
-                        {
-                            "decision": 2,  # Expert
-                            "response": expert_responses[i][0],
-                            "base_response": base_response,
-                            "large_response": large_response,
-                            "base_probs": base_probs[i].item(),
-                            "large_probs": large_probs_for_base[i].item(),
-                            "acceptance_ratio": alpha_i,
-                            "uncertainty": small_uncert,
-                            "base_uncertainty": small_uncert,
-                            "large_uncertainty": big_uncert,
-                            "cost": self.base_gen_cost
-                            + self.large_inf_cost
-                            + self.expert_cost,
-                            "acceptance_prob": alpha_i,
-                        }
-                    )
+            base_model_predictions.append(base_response)
+            large_model_predictions.append(large_response)
 
-                else:
-                    # Accept small model
-                    decisions.append(
-                        {
-                            "decision": 0,  # small model
-                            "response": base_response,
-                            "base_response": base_response,
-                            "large_response": large_response,
-                            "base_probs": base_probs[i].item(),
-                            "large_probs": large_probs_for_base[i].item(),
-                            "acceptance_ratio": alpha_i,
-                            "uncertainty": small_uncert,
-                            "base_uncertainty": small_uncert,
-                            "large_uncertainty": big_uncert,
-                            "cost": self.base_gen_cost + self.large_inf_cost,
-                            "acceptance_prob": alpha_i,
-                        }
-                    )
-            else:
-                # If we use the large model, check if it's also too uncertain
-                if big_uncert > self.uncertainty_threshold:
-                    decisions.append(
-                        {
-                            "decision": 2,  # Expert
-                            "response": expert_responses[i][0],
-                            "base_response": base_response,
-                            "large_response": large_response,
-                            "base_probs": base_probs[i].item(),
-                            "large_probs": large_probs_for_base[i].item(),
-                            "acceptance_ratio": alpha_i,
-                            "uncertainty": big_uncert,
-                            "base_uncertainty": small_uncert,
-                            "large_uncertainty": big_uncert,
-                            "cost": self.base_gen_cost
-                            + self.large_inf_cost
-                            + self.large_gen_cost
-                            + self.expert_cost,
-                            "acceptance_prob": alpha_i,
-                        }
-                    )
-                else:
-                    # Accept large model
-                    decisions.append(
-                        {
-                            "decision": 1,  # large model
-                            "response": large_response,
-                            "base_response": base_response,
-                            "large_response": large_response,
-                            "base_probs": base_probs[i].item(),
-                            "large_probs": large_probs_for_base[i].item(),
-                            "acceptance_ratio": alpha_i,
-                            "uncertainty": big_uncert,
-                            "base_uncertainty": small_uncert,
-                            "large_uncertainty": big_uncert,
-                            "cost": self.base_gen_cost
-                            + self.large_inf_cost
-                            + self.large_gen_cost,
-                            "acceptance_prob": alpha_i,
-                        }
-                    )
-
-        return decisions, small_model_predictions, large_model_predictions
+        return decisions, base_model_predictions, large_model_predictions

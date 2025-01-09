@@ -1,8 +1,10 @@
 import re
 import os
-import scienceplots
 import matplotlib.pyplot as plt
 import seaborn as sns
+import random
+import torch
+import numpy as np
 
 sns.set_style("whitegrid")
 plt.style.use("science")
@@ -112,3 +114,14 @@ def plot_decision_distribution(run_dir, decisions, labels):
     plt.ylabel("Frequency")
     plt.title("Distribution of Decisions")
     plt.savefig(os.path.join(run_dir, "decision_distribution.pdf"), bbox_inches="tight")
+
+
+def set_seed(seed):
+    """Set all random seeds for reproducibility."""
+    random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
