@@ -260,6 +260,19 @@ class Experiment:
         dynamic_accuracy = data['correct'].mean()
         dynamic_accuracy_err = data['correct'].std() / np.sqrt(len(data['correct']))
         dynamic_cost = data['cost'].sum()
+        
+        # Calculate Incremental Benefit-Cost (ICB - AutoMix)
+        # We will have three delta ICB scores, base-large, base-expert, large-expert
+        ibc_base2large = (accuracy_large - accuracy_base)/(cost_large - cost_base)
+        ibc_base2model = (dynamic_accuracy - accuracy_base)/(dynamic_cost - cost_base)
+        delta_ibc_base2large = (ibc_base2large - ibc_base2model)/ibc_base2model * 100
+        
+        ibc_base2lexpert = (1.0 - accuracy_base)/(self.cfg.expert_cost*len(data) - cost_base)
+        delta_ibc_base2lexpert = (ibc_base2large - ibc_base2lexpert)/ibc_base2lexpert * 100
+        
+        ibc_large2expert = (1.0 - accuracy_large)/(self.cfg.expert_cost*len(data) - cost_large)
+        ibc_large2model = (dynamic_accuracy - accuracy_large)/(dynamic_cost - cost_large)
+        delta_ibc_large2expert = (ibc_large2model - ibc_large2expert)/ibc_large2expert * 100
 
         # Generate plots
         plot_accuracy_vs_cost(
@@ -294,6 +307,9 @@ class Experiment:
             'cost_base': cost_base,
             'cost_large': cost_large,
             'dynamic_cost': dynamic_cost,
+            'dibc_base2large': delta_ibc_base2large,
+            'dibc_base2lexpert': delta_ibc_base2lexpert,
+            'dibc_large2expert': delta_ibc_large2expert,
         }
         
         # Save metrics to file
@@ -365,6 +381,14 @@ class Experiment:
                 for item, width in zip(row, col_widths)
             ]
             print("  ".join(formatted_row))
+            
+        # Add Incremental Cost-Benefit
+        print("\nIncremental Cost-Benefit:")
+        print("====================")
+        
+        print(f"∆IBC(Base -> Large):\t {metrics['dibc_base2large']:.1f}")
+        print(f"∆IBC(Base -> Expert):\t {metrics['dibc_base2lexpert']:.1f}")
+        print(f"∆IBC(Large -> Expert):\t {metrics['dibc_large2expert']:.1f}")
 
         # Add decision distribution information
         print("\nDecision Distribution:")
@@ -375,4 +399,4 @@ class Experiment:
         for decision, count in model_counts.items():
             model_name = ['Base Model', 'Large Model', 'Expert'][decision]
             percentage = (count / total_samples) * 100
-            print(f"{model_name}: {count} samples ({percentage:.1f}%)")
+            print(f"{model_name}:\t {count} samples ({percentage:.1f}%)")
