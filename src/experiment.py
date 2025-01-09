@@ -265,10 +265,10 @@ class Experiment:
         # We will have three delta ICB scores, base-large, base-expert, large-expert
         ibc_base2large = (accuracy_large - accuracy_base)/(cost_large - cost_base)
         ibc_base2model = (dynamic_accuracy - accuracy_base)/(dynamic_cost - cost_base)
-        delta_ibc_base2large = (ibc_base2large - ibc_base2model)/ibc_base2model * 100
+        delta_ibc_base2large = (ibc_base2model - ibc_base2large)/ibc_base2large * 100
         
         ibc_base2lexpert = (1.0 - accuracy_base)/(self.cfg.expert_cost*len(data) - cost_base)
-        delta_ibc_base2lexpert = (ibc_base2large - ibc_base2lexpert)/ibc_base2lexpert * 100
+        delta_ibc_base2lexpert = (ibc_base2model - ibc_base2lexpert)/ibc_base2lexpert * 100
         
         ibc_large2expert = (1.0 - accuracy_large)/(self.cfg.expert_cost*len(data) - cost_large)
         ibc_large2model = (dynamic_accuracy - accuracy_large)/(dynamic_cost - cost_large)
@@ -294,6 +294,11 @@ class Experiment:
             self.run_dir,
             data['decision'],
             ['Base Model', 'Large Model', 'Expert']
+        )
+        
+        plot_tau_M(
+            self.run_dir,
+            data[['tau_base', 'tau_large', 'M']],
         )
 
         # Save metrics

@@ -26,10 +26,10 @@ sft:
   lora_r: 32
   lora_alpha: 64
   lora_dropout: 0.1
-num_samples: 100
+num_samples: 105
 verification_fn: surrogate_token_probs
 uncertainty_fn: per_token_entropy
 prompt_template: 'Please answer with only one of the multiple choice option in the brackets.'
 dataset: medalpaca/medical_meadow_medqa
-device: cuda:2
+device: cuda:1
 name_postfix: debug

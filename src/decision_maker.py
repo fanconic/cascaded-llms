@@ -207,30 +207,31 @@ class AIDecisionSystem:
     def _update_parameters(self, decision: int, is_correct: bool) -> None:
         """Update M and tau parameters based on decision outcome."""
         dM = 0.0
-        dTau = 0.0
+        dTau_base = 0.0
+        dTau_large = 0.0
 
         if decision == 0:  # used small model
             if not is_correct:
                 dM -= 1.0
-                dTau -= 0.5
+                dTau_base -= 0.5
         elif decision == 1:  # used large model
             if is_correct:
                 dM += 0.5
             else:
-                dTau -= 1.0
+                dTau_large -= 1.0
         elif decision == 2:  # expert
-            dTau -= 0.1
+            dTau_base -= 0.1
+            dTau_large -= 0.1
 
-        self.M = max(1e-3, self.M - self.lr_M * dM)
-        self.tau_base = max(0.0, self.tau_base - self.lr_tau * dTau)
-        self.tau_large = max(0.0, self.tau_large - self.lr_tau * dTau)
+        self.M = max(1e-3, self.M + self.lr_M * dM)
+        self.tau_base = max(0.0, self.tau_base + self.lr_tau * dTau_base)
+        self.tau_large = max(0.0, self.tau_large + self.lr_tau * dTau_large)
 
     def decide_batch(
         self,
         prompts: List[str],
         expert_responses: List[List[str]],
         questions: List[str],
-        gold_labels: Optional[List[str]] = None,
     ) -> Tuple[List[Dict[str, Any]], List[str], List[str]]:
         """Process a batch of prompts and make decisions with optional online learning."""
         base_outputs = self.generate_response(
