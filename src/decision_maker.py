@@ -168,7 +168,8 @@ class AIDecisionSystem:
         expert_response: str,
     ) -> Tuple[int, str, float]:
         """Make a decision for a single prompt."""
-        if random.random() < acceptance_prob:
+        u = random.random()
+        if u < acceptance_prob:
             if base_uncert > self.tau_base:
                 return (
                     2,
@@ -177,12 +178,14 @@ class AIDecisionSystem:
                     + self.costs.large_inf_cost
                     + self.costs.expert_cost,
                     base_uncert,
+                    u
                 )
             return (
                 0,
                 base_response,
                 self.costs.base_gen_cost + self.costs.large_inf_cost,
                 base_uncert,
+                u
             )
         else:
             if large_uncert > self.tau_large:
@@ -194,6 +197,7 @@ class AIDecisionSystem:
                     + self.costs.large_gen_cost
                     + self.costs.expert_cost,
                     large_uncert,
+                    u
                 )
             return (
                 1,
@@ -202,6 +206,7 @@ class AIDecisionSystem:
                 + self.costs.large_inf_cost
                 + self.costs.large_gen_cost,
                 large_uncert,
+                u
             )
 
     def _update_parameters(self, decision: int, is_correct: bool) -> None:
@@ -211,12 +216,13 @@ class AIDecisionSystem:
         dTau_large = 0.0
 
         if decision == 0:  # used small model
-            if not is_correct:
+            if is_correct:
                 dM -= 1.0
-                dTau_base -= 0.5
+            else:
+                dM += 1.0
         elif decision == 1:  # used large model
             if is_correct:
-                dM += 0.5
+                dM += 1.0
             else:
                 dTau_large -= 1.0
         elif decision == 2:  # expert
@@ -256,7 +262,7 @@ class AIDecisionSystem:
             base_response = base_outputs[i].strip()
             large_response = large_outputs[i].strip()
 
-            decision, final_answer, cost, uncertainty = self._make_decision(
+            decision, final_answer, cost, uncertainty, u = self._make_decision(
                 acceptance_prob[i].item(),
                 base_uncertainties[i].item(),
                 large_uncertainties[i].item(),
@@ -287,6 +293,7 @@ class AIDecisionSystem:
                     "tau_base": self.tau_base,
                     "tau_large": self.tau_large,
                     "M": self.M,
+                    "u": u,
                 }
             )
 

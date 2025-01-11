@@ -61,7 +61,7 @@ class Experiment:
 
     def _load_dataset(self) -> Tuple[DataLoader, int]:
         dataset = load_dataset(
-            self.cfg.dataset, split=f"train[:{self.cfg.num_samples}]"
+            self.cfg.dataset, split=f"validation[:{self.cfg.num_samples}]"
         )
         return DataLoader(dataset, batch_size=self.cfg.batch_size, shuffle=False), len(
             dataset
@@ -121,17 +121,19 @@ class Experiment:
             "tau_base": [],
             "tau_large": [],
             "M": [],
+            "u": [],
         }
 
         for batch in tqdm(self.dataset):
+            batch["options_new"] = [dict(zip(batch["options"],t)) for t in zip(*batch["options"].values())]
             prompts = [
-                f"{self.cfg.prompt_template}\n{sample}\nThe best answer is: "
-                for sample in batch["input"]
+                f"{self.cfg.prompt_template}\n\nQuestion: {question}\n\n Options:{str(option)}\n\nAnswer:"
+                for question, option in zip(batch["question"], batch["options_new"])
             ]
-            questions = [f"{sample}" for sample in batch["input"]]
+            questions = [f"Question: {question}\n\n Options:{str(option)}" for question, option in zip(batch["question"], batch["options_new"])]
 
             batch_decisions, small_predictions, large_predictions = (
-                self.decision_system.decide_batch(prompts, batch["output"], questions)
+                self.decision_system.decide_batch(prompts, batch["answer_idx"], questions)
             )
 
             self._process_batch_results(
@@ -158,7 +160,7 @@ class Experiment:
         collectors["all_large_predictions"].extend(large_predictions)
 
         for i, decision in enumerate(batch_decisions):
-            self._update_collectors(collectors, decision, batch["output"][i][0])
+            self._update_collectors(collectors, decision, batch["answer_idx"][i][0])
 
             if self.sft_trainers:
                 self._update_sft_trainers(
@@ -194,6 +196,7 @@ class Experiment:
         collectors["base_prob"].append(decision["base_probs"])
         collectors["large_prob"].append(decision["large_probs"])
         collectors["acceptance_probs"].append(decision["acceptance_prob"])
+        collectors["u"].append(decision["u"])
 
     def _create_dataframe_dict(self, collectors: Dict) -> Dict:
         """Create dictionary for DataFrame creation from collectors."""
@@ -223,6 +226,7 @@ class Experiment:
             "tau_base": collectors["tau_base"],
             "tau_large": collectors["tau_large"],
             "M": collectors["M"],
+            "u": collectors["u"],
         }
 
     def _analyze_and_save_results(self, results: Dict):
@@ -325,6 +329,16 @@ class Experiment:
         
         self._print_performance_summary(data=data, metrics=metrics)
         
+        # Add decision matrix analysis
+        outcomes = self._analyze_decision_outcomes(data)
+        self._print_decision_matrix(outcomes)
+        
+        # Save outcomes to file
+        pd.DataFrame([outcomes]).to_csv(
+            os.path.join(self.run_dir, "decision_outcomes.csv"), 
+            index=False
+        )
+        
     def _print_performance_summary(self, data: pd.DataFrame, metrics: Dict) -> None:
         """Print a formatted table summarizing the performance of different agents."""
         
@@ -404,4 +418,140 @@ class Experiment:
         for decision, count in model_counts.items():
             model_name = ['Base Model', 'Large Model', 'Expert'][decision]
             percentage = (count / total_samples) * 100
-            print(f"{model_name}:\t {count} samples ({percentage:.1f}%)")
+            print(f"{model_name}:\t\t {count} samples ({percentage:.1f}%)")
+            
+    def _print_decision_matrix(self, outcomes: Dict[str, int]) -> None:
+        """
+        Print a formatted decision matrix showing all possible outcomes.
+        """
+        total = outcomes['SM_Path_Total'] + outcomes['LM_Path_Total']
+        
+        print("\nDecision Outcome Matrix:")
+        print("=======================")
+        
+        # Small Model Path Analysis
+        print(f"\nSmall Model Path ({outcomes['SM_Path_Total']} samples, {outcomes['SM_Path_Total']/total*100:.1f}%):")
+        s2m_total = outcomes['SM_Necessary_Large'] + outcomes['SM_Unnecessary_Large']
+        print(f"├── Large Model Escalation ({s2m_total} samples, {s2m_total/total*100:.1f}%):")
+        if s2m_total > 0:
+            print(f"│   ├── Necessary: {outcomes['SM_Necessary_Large']} ({outcomes['SM_Necessary_Large']/s2m_total*100:.1f}%)")
+            print(f"│   └── Unnecessary: {outcomes['SM_Unnecessary_Large']} ({outcomes['SM_Unnecessary_Large']/s2m_total*100:.1f}%)")
+        sm_total_direct = outcomes['SM_Direct_Correct'] + outcomes['SM_Direct_Wrong']
+        print(f"├── Direct Decisions ({sm_total_direct} samples, {sm_total_direct/total*100:.1f}%):")
+        if sm_total_direct > 0:
+            print(f"│   ├── Correct: {outcomes['SM_Direct_Correct']} ({outcomes['SM_Direct_Correct']/sm_total_direct*100:.1f}%)")
+            print(f"│   └── Wrong: {outcomes['SM_Direct_Wrong']} ({outcomes['SM_Direct_Wrong']/sm_total_direct*100:.1f}%)")
+        sm_total_escalated = outcomes['SM_Necessary_Expert'] + outcomes['SM_Unnecessary_Expert']
+        print(f"└── Expert Escalations: ({sm_total_escalated} samples, {sm_total_escalated/total*100:.1f}%):")
+        if sm_total_escalated > 0:
+            print(f"    ├── Necessary Escalated: {outcomes['SM_Necessary_Expert']} ({outcomes['SM_Necessary_Expert']/sm_total_escalated*100:.1f}%)")
+            print(f"    └── Unnecessary Escalations: {outcomes['SM_Unnecessary_Expert']} ({outcomes['SM_Unnecessary_Expert']/sm_total_escalated*100:.1f}%)")
+        
+        # Large Model Path Analysis
+        print(f"\nLarge Model Path ({outcomes['LM_Path_Total']} samples, {outcomes['LM_Path_Total']/total*100:.1f}%):")
+        lm_total_direct = outcomes['LM_Direct_Correct'] + outcomes['LM_Direct_Wrong']
+        print(f"├── Direct Decisions ({lm_total_direct} samples, {lm_total_direct/outcomes['LM_Path_Total']*100:.1f}%):")
+        if lm_total_direct > 0:
+            print(f"│   ├── Correct: {outcomes['LM_Direct_Correct']} ({outcomes['LM_Direct_Correct']/lm_total_direct*100:.1f}%)")
+            print(f"│   └── Wrong: {outcomes['LM_Direct_Wrong']} ({outcomes['LM_Direct_Wrong']/lm_total_direct*100:.1f}%)")
+        lm_total_escalated = outcomes['LM_Necessary_Expert'] + outcomes['LM_Unnecessary_Expert']
+        print(f"└── Expert Escalations: ({lm_total_escalated} samples, {lm_total_escalated/outcomes['LM_Path_Total']*100:.1f}%):")
+        if lm_total_escalated > 0:
+            print(f"    ├── Necessary Escalated: {outcomes['LM_Necessary_Expert']} ({outcomes['LM_Necessary_Expert']/lm_total_escalated*100:.1f}%)")
+            print(f"    └── Unnecessary Escalations: {outcomes['LM_Unnecessary_Expert']} ({outcomes['LM_Unnecessary_Expert']/lm_total_escalated*100:.1f}%)")
+        
+        # Expert Analysis
+        print(f"\nExpert Decisions ({outcomes['Expert_Total']} samples, {outcomes['Expert_Total']/total*100:.1f}% of total):")
+        necessary = outcomes['SM_Necessary_Expert'] + outcomes['LM_Necessary_Expert']
+        unnecessary = outcomes['SM_Unnecessary_Expert'] + outcomes['LM_Unnecessary_Expert']
+        if outcomes['Expert_Total'] > 0:
+            print(f"├── Necessary: {necessary} ({necessary/outcomes['Expert_Total']*100:.1f}%)")
+            print(f"└── Unnecessary: {unnecessary} ({unnecessary/outcomes['Expert_Total']*100:.1f}%)")
+
+    def _analyze_decision_outcomes(self, data: pd.DataFrame) -> Dict[str, int]:
+        """
+        Analyze decision outcomes and classify them into categories.
+        
+        The analysis tracks scenarios including:
+        - Small Model decision outcomes (confident & correct/wrong, uncertain -> expert)
+        - Large Model decision outcomes (confident & correct/wrong, uncertain -> expert)
+        - Expert outcomes (from SM path vs LM path, correct/wrong)
+        
+        Args:
+            data: DataFrame containing decision outcomes with columns:
+                'decision', 'prediction', 'label', 'uncertainty',
+                'acceptance_prob', etc.
+        
+        Returns:
+            Dictionary containing counts for each scenario
+        """
+        outcomes = {
+            # Small Model Direct Decisions
+            'SM_Direct_Correct': 0,      # Small model correct (no escalation)
+            'SM_Direct_Wrong': 0,        # Small model wrong (no escalation)
+            'SM_Necessary_Large' : 0,
+            'SM_Unnecessary_Large' : 0,
+            'SM_Necessary_Expert': 0,     # Small model wrong & uncertainty was high
+            'SM_Unnecessary_Expert': 0,   # Small model would be correct but escalated
+            
+            # Large Model Direct Decisions
+            'LM_Direct_Correct': 0,      # Large model correct (no escalation)
+            'LM_Direct_Wrong': 0,        # Large model wrong (no escalation)
+            'LM_Necessary_Expert': 0,     # Large model wrong & uncertainty was high
+            'LM_Unnecessary_Expert': 0,   # Large model would be correct but escalated
+            
+            
+            # Path Analysis
+            'SM_Path_Total': 0,          # Total decisions through small model path
+            'LM_Path_Total': 0,          # Total decisions through large model path
+            'Expert_Total': 0            # Total expert consultations
+        }
+        
+        for _, row in data.iterrows():
+            # Extract key values
+            decision = row['decision']
+            is_correct = row['prediction'] == row['label']
+            base_would_be_correct = row['base_prediction'] == row['label']
+            large_would_be_correct = row['large_prediction'] == row['label']
+            
+            # Determine which path was taken (based on acceptance_prob)
+            took_sm_path = row['u'] < row['acceptance_prob']
+            
+            if took_sm_path:
+                outcomes['SM_Path_Total'] += 1
+                
+                if decision == 0:  # Used Small Model
+                    if is_correct:
+                        outcomes['SM_Direct_Correct'] += 1
+                    else:
+                        outcomes['SM_Direct_Wrong'] += 1
+                            
+                elif decision == 2:  # Escalated to Expert
+                    outcomes['Expert_Total'] += 1
+                    if base_would_be_correct:
+                        outcomes['SM_Unnecessary_Expert'] += 1
+                    else:
+                        outcomes['SM_Necessary_Expert'] += 1
+                    
+                        
+            else:  # Large Model Path
+                outcomes['LM_Path_Total'] += 1
+                if base_would_be_correct:
+                    outcomes['SM_Unnecessary_Large'] += 1
+                else: 
+                    outcomes['SM_Necessary_Large'] += 1
+                    
+                if decision == 1:  # Used Large Model
+                    if is_correct:
+                        outcomes['LM_Direct_Correct'] += 1
+                    else:
+                        outcomes['LM_Direct_Wrong'] += 1
+                            
+                elif decision == 2:  # Escalated to Expert
+                    outcomes['Expert_Total'] += 1
+                    if large_would_be_correct:
+                        outcomes['LM_Unnecessary_Expert'] += 1
+                    else:
+                        outcomes['LM_Necessary_Expert'] += 1  
+        
+        return outcomes

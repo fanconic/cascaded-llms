@@ -12,9 +12,9 @@ large_model: meta-llama/Llama-3.1-8B-Instruct
 batch_size: 7
 max_input_length: 512
 online:
-  enable: true
-  initial_uncertainty_threshold_base: 2.0
-  initial_uncertainty_threshold_large: 2.0
+  enable: false
+  initial_uncertainty_threshold_base: 300
+  initial_uncertainty_threshold_large: 300
   initial_M: 1.0
   lr_tau: 0.1
   lr_M: 0.1
@@ -29,7 +29,7 @@ sft:
 num_samples: 105
 verification_fn: surrogate_token_probs
 uncertainty_fn: per_token_entropy
-prompt_template: 'Please answer with only one of the multiple choice option in the brackets.'
-dataset: medalpaca/medical_meadow_medqa
-device: cuda:1
+prompt_template: 'You are a medical doctor taking the US Medical Licensing Examination. You need to demonstrate your understanding of basic and clinical science, medical knowledge, and mechanisms underlying health, disease, patient care, and modes of therapy. Show your ability to apply the knowledge essential for medical practice. For the following multiple-choice question, select one correct answer from A to E. Base your answer on the current and standard practices referenced in medical guidelines.'
+dataset: HuggingSara/medqa
+device: cuda:0
 name_postfix: debug
