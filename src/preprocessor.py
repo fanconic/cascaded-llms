@@ -16,16 +16,23 @@ class MedQAPreprocessor(DatasetPreprocessor):
 
     @staticmethod
     def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
-        prompt_template = "You are a medical doctor taking the US Medical Licensing Examination. You need to demonstrate your understanding of basic and clinical science, medical knowledge, and mechanisms underlying health, disease, patient care, and modes of therapy. Show your ability to apply the knowledge essential for medical practice. For the following multiple-choice question, select one correct answer from A to E. Base your answer on the current and standard practices referenced in medical guidelines."
-        
+        prompt_template = "You are a medical doctor taking the US Medical Licensing Examination. You need to demonstrate your understanding of basic and clinical science, medical knowledge, and mechanisms underlying health, disease, patient care, and modes of therapy. Show your ability to apply the knowledge essential for medical practice. For the following multiple-choice question, select one correct answer from 0,1,2,3,4. Base your answer on the current and standard practices referenced in medical guidelines."
+        class_labels = {"A": "0", "B": "1", "C": "2", "D":"3", "E":"4"}
         def preprocess_example(example):
-            option = str(example["options"]).replace("'", "")
+            option = {
+                "0": example["options"]["A"],
+                "1": example["options"]["B"], 
+                "2": example["options"]["C"], 
+                "3": example["options"]["D"], 
+                "4": example["options"]["E"], 
+            }
+            option = str(option).replace("'", "")
             prompt = f"{prompt_template}\n\nQuestion: {example['question']}\n\nOptions:{option}\n\nAnswer: "
 
             questions = f"{example['question']}\n\nOptions:{option}"
             example["prompts"] = prompt
             example["questions"] = questions
-            example["answer"] = example["answer_idx"]
+            example["answer"] = class_labels[example["answer_idx"]]
             del example["question"]
             del example["answer_idx"]
             del example["meta_info"]
