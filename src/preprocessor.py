@@ -17,7 +17,7 @@ class MedQAPreprocessor(DatasetPreprocessor):
     @staticmethod
     def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
         prompt_template = "You are a medical doctor taking the US Medical Licensing Examination. You need to demonstrate your understanding of basic and clinical science, medical knowledge, and mechanisms underlying health, disease, patient care, and modes of therapy. Show your ability to apply the knowledge essential for medical practice. For the following multiple-choice question, select one correct answer from A to E. Base your answer on the current and standard practices referenced in medical guidelines."
-
+        
         def preprocess_example(example):
             option = str(example["options"]).replace("'", "")
             prompt = f"{prompt_template}\n\nQuestion: {example['question']}\n\nOptions:{option}\n\nAnswer: "
@@ -35,8 +35,40 @@ class MedQAPreprocessor(DatasetPreprocessor):
         return dataset.map(preprocess_example, batched=False)
     
     
+class MedMCQAPreprocessor(DatasetPreprocessor):
+    """Preprocessing logic for MedMCQA dataset."""
+
+    @staticmethod
+    def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
+        prompt_template = "You are a medical doctor answering realworld medical entrance exam questions. Based on your understanding of basic and clinical science, medical knowledge, and mechanisms underlying health, disease, patient care, and modes of therapy, answer the following multiple-choice question. Select one correct answer from 0,1,2,3. Base your answer on the current and standard practices referenced in medical guidelines."
+        class_labels = {0: "0", 1: "1", 2: "2", 3:"3"}
+        def preprocess_example(example):
+            option = {'0': example["opa"], '1': example["opb"], '2': example["opc"], '3': example["opd"]}
+            option = str(option).replace("'", "")
+            prompt = f"{prompt_template}\n\nQuestion: {example['question']}\n\nOptions:{option}\n\nAnswer: "
+
+            questions = f"{example['question']}\n\nOptions:{option}"
+            example["prompts"] = prompt
+            example["questions"] = questions
+            example["answer"] = class_labels[example["cop"]]
+            del example["question"]
+            del example["id"]
+            del example["cop"]
+            del example["opa"]
+            del example["opb"]
+            del example["opc"]
+            del example["opd"]
+            del example["choice_type"]
+            del example["exp"]
+            del example["subject_name"]
+            del example["topic_name"]
+            return example
+
+        return dataset.map(preprocess_example, batched=False)
+    
+    
 class PubMedQAPreprocessor(DatasetPreprocessor):
-    """Preprocessing logic for MedQA dataset."""
+    """Preprocessing logic for PubMedQA dataset."""
 
     @staticmethod
     def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
@@ -118,5 +150,7 @@ def get_preprocessor(dataset_name: str) -> Callable:
         "HuggingSara/medqa": MedQAPreprocessor,
         "allenai/ai2_arc": ARC2AIPreprocessor,
         "qiaojin/PubMedQA": PubMedQAPreprocessor,
+        "openlifescienceai/medmcqa": MedMCQAPreprocessor,
+        "Eladio/emrqa-msquad": DatasetPreprocessor,
     }
     return preprocessors.get(dataset_name, DefaultPreprocessor)

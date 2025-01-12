@@ -6,18 +6,18 @@ large_inf_cost: 1.0
 large_gen_cost: 25.0
 expert_cost: 100.0
 #base_model: HuggingFaceTB/SmolLM-1.7B-Instruct
-base_model: meta-llama/Llama-3.2-1B-Instruct
-#large_model: meta-llama/Llama-3.1-8B-Instruct
-large_model: /mnt/pdata/caf83/helm/me-llama/physionet.org/files/me-llama/1.0.0/MeLLaMA-13B-chat
+base_model: meta-llama/Llama-3.2-3B-Instruct
+large_model: meta-llama/Llama-3.1-8B-Instruct
+#large_model: /mnt/pdata/caf83/helm/me-llama/physionet.org/files/me-llama/1.0.0/MeLLaMA-13B-chat
 batch_size: 7
-max_input_length: 750
+max_input_length: 512
 online:
   enable: false
-  initial_uncertainty_threshold_base: 300
-  initial_uncertainty_threshold_large: 300
+  initial_uncertainty_threshold_base: 2.0
+  initial_uncertainty_threshold_large: 2.0
   initial_M: 1.0
-  lr_tau: 0.1
-  lr_M: 0.1
+  lr_tau: 0.01
+  lr_M: 0.01
   error_penalty: 10
 sft:
   enable: false
@@ -29,9 +29,9 @@ sft:
 verification_fn: surrogate_token_probs
 uncertainty_fn: per_token_entropy
 dataset:
-  name: openlifescienceai/medmcqa
+  name: HuggingSara/medqa
   subset: 
   split: validation
-  num_samples: 21
-device: cuda:0
-name_postfix: debug
+  num_samples: -1
+device: cuda:2
+name_postfix: llama_3_8_validation
