@@ -44,7 +44,6 @@ class ExperimentConfig:
     max_input_length: int
     max_new_tokens: int
     device: str
-    prompt_template: str
 
     def __post_init__(self):
         self.verification_fn = VERIFICATION_FN_MAPPING[self.verification_fn]

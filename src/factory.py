@@ -20,7 +20,6 @@ class DecisionMakerFactory:
             "max_input_length": exp_config.max_input_length,
             "max_new_tokens": exp_config.max_new_tokens,
             "device": exp_config.device,
-            "prompt_template": exp_config.prompt_template,
             **cost_config,
         }
 
@@ -28,7 +27,6 @@ class DecisionMakerFactory:
             max_input_length=exp_config.max_input_length,
             max_new_tokens=exp_config.max_new_tokens,
             device=exp_config.device,
-            prompt_template=exp_config.prompt_template,
         )
 
         cost_config_obj = CostConfig(**cost_config)

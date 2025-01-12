@@ -178,14 +178,14 @@ class AIDecisionSystem:
                     + self.costs.large_inf_cost
                     + self.costs.expert_cost,
                     base_uncert,
-                    u
+                    u,
                 )
             return (
                 0,
                 base_response,
                 self.costs.base_gen_cost + self.costs.large_inf_cost,
                 base_uncert,
-                u
+                u,
             )
         else:
             if large_uncert > self.tau_large:
@@ -197,7 +197,7 @@ class AIDecisionSystem:
                     + self.costs.large_gen_cost
                     + self.costs.expert_cost,
                     large_uncert,
-                    u
+                    u,
                 )
             return (
                 1,
@@ -206,7 +206,7 @@ class AIDecisionSystem:
                 + self.costs.large_inf_cost
                 + self.costs.large_gen_cost,
                 large_uncert,
-                u
+                u,
             )
 
     def _update_parameters(self, decision: int, is_correct: bool) -> None:

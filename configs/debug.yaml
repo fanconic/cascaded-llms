@@ -6,7 +6,7 @@ large_inf_cost: 1.0
 large_gen_cost: 25.0
 expert_cost: 100.0
 #base_model: HuggingFaceTB/SmolLM-1.7B-Instruct
-base_model: meta-llama/Llama-3.2-3B-Instruct
+base_model: meta-llama/Llama-3.2-1B-Instruct
 large_model: meta-llama/Llama-3.1-8B-Instruct
 #large_model: /mnt/pdata/caf83/helm/me-llama/physionet.org/files/me-llama/1.0.0/MeLLaMA-13B-chat
 batch_size: 7
@@ -26,10 +26,12 @@ sft:
   lora_r: 32
   lora_alpha: 64
   lora_dropout: 0.1
-num_samples: 105
 verification_fn: surrogate_token_probs
 uncertainty_fn: per_token_entropy
-prompt_template: 'You are a medical doctor taking the US Medical Licensing Examination. You need to demonstrate your understanding of basic and clinical science, medical knowledge, and mechanisms underlying health, disease, patient care, and modes of therapy. Show your ability to apply the knowledge essential for medical practice. For the following multiple-choice question, select one correct answer from A to E. Base your answer on the current and standard practices referenced in medical guidelines.'
-dataset: HuggingSara/medqa
+dataset:
+  name: allenai/ai2_arc
+  subset: ARC-Easy
+  split: validation
+  num_samples: 105
 device: cuda:0
 name_postfix: debug
