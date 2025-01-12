@@ -20,9 +20,9 @@ class MedQAPreprocessor(DatasetPreprocessor):
 
         def preprocess_example(example):
             option = str(example["options"]).replace("'", "")
-            prompt = f"{prompt_template}\n\nQuestion: {example['question']}\n\n Options:{option}\n\nAnswer: "
+            prompt = f"{prompt_template}\n\nQuestion: {example['question']}\n\nOptions:{option}\n\nAnswer: "
 
-            questions = f"Question: {example['question']}\n\n Options:{option}"
+            questions = f"{example['question']}\n\nOptions:{option}"
             example["prompts"] = prompt
             example["questions"] = questions
             example["answer"] = example["answer_idx"]
@@ -30,6 +30,31 @@ class MedQAPreprocessor(DatasetPreprocessor):
             del example["answer_idx"]
             del example["meta_info"]
             del example["options"]
+            return example
+
+        return dataset.map(preprocess_example, batched=False)
+    
+    
+class PubMedQAPreprocessor(DatasetPreprocessor):
+    """Preprocessing logic for MedQA dataset."""
+
+    @staticmethod
+    def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
+        prompt_template = "“Your task is to answer biomedical questions using the given abstract. Only output 'yes' or 'no' as answer."
+
+        def preprocess_example(example):
+            context = (" ").join(example["context"]["contexts"])
+            prompt = f"{prompt_template}\n\nABSTRACT:{context}\n\n\INPUT: {example['question']}\n\n" + "OPTIONS: {yes, no}\n\nAnswer: "
+
+            questions = prompt
+            example["prompts"] = prompt
+            example["questions"] = questions
+            example["answer"] = example["final_decision"]
+            del example["question"]
+            del example["final_decision"]
+            del example["long_answer"]
+            del example["pubid"]
+            del example["context"]
             return example
 
         return dataset.map(preprocess_example, batched=False)
@@ -42,21 +67,26 @@ class ARC2AIPreprocessor(DatasetPreprocessor):
     def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
 
         prompt_template = "Please answer with one of the option in the bracket"
+        
+        label2number = {
+            "A": "1", "B": "2", "C": "3", "D": "4", "E":"5",
+            "1": "1", "2": "2", "3": "3", "4": "4", "5":"5"
+        }
 
         def preprocess_example(example):
             option = {
-                label: text
+                label2number[label]: text
                 for text, label in zip(
                     example["choices"]["text"], example["choices"]["label"]
                 )
             }
             option = str(option).replace("'", "")
-            prompt = f"{prompt_template}\n\nQuestion: {example['question']}\n\n Options:{option}\n\nAnswer: "
+            prompt = f"{prompt_template}\n\nQuestion: {example['question']}\n\nOptions:{option}\n\nAnswer: "
 
-            questions = f"Question: {example['question']}\n\n Options:{option}"
+            questions = f"{example['question']}\n\n Options:{option}"
             example["prompts"] = prompt
             example["questions"] = questions
-            example["answer"] = example["answerKey"]
+            example["answer"] = label2number[example["answerKey"]]
             del example["question"]
             del example["answerKey"]
             del example["choices"]
@@ -87,6 +117,6 @@ def get_preprocessor(dataset_name: str) -> Callable:
     preprocessors = {
         "HuggingSara/medqa": MedQAPreprocessor,
         "allenai/ai2_arc": ARC2AIPreprocessor,
-        "qiaojin/PubMedQA": DatasetPreprocessor,
+        "qiaojin/PubMedQA": PubMedQAPreprocessor,
     }
     return preprocessors.get(dataset_name, DefaultPreprocessor)

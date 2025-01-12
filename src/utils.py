@@ -12,31 +12,33 @@ plt.rcParams["font.family"] = "sans-serif"
 
 
 def extract_predictions(response: str) -> str:
-    """Extract the single MC prediction from the response text.
+    """Extract the single prediction from the response text.
 
     Args:
         response (str): Full response of the LLMs.
 
     Returns:
-        str: Single character response (A, B, C, D, or E) of the MC question, or None if not found.
+        str: Single character or word response ("A-E", "1-5", "yes", "no"), or None if not found.
     """
     try:
-        # Patterns to match different formats of "best answer" and single letter answers
+        # Patterns to match different formats of predictions
         patterns = [
-            r"The best answer is: (\w)",  # "The best answer is: A"
-            r"The best answer is (\w)",  # "The best answer is A"
-            r"^([A-E])$",  # standalone single letter A-E
-            r"\b([A-E])\b",  # single letter A-E in a larger text
+            r"The best answer is: (\w+)",  # "The best answer is: A" or "The best answer is: 1"
+            r"The best answer is (\w+)",  # "The best answer is A" or "The best answer is 1"
+            r"^([A-E1-5])$",  # standalone single character A-E or 1-5
+            r"\b([A-E1-5])\b",  # single character A-E or 1-5 in a larger text
+            r"\b(yes|no)\b",  # exact match for "yes" or "no"
         ]
 
         # Loop through the patterns to find a match
         for pattern in patterns:
-            match = re.search(pattern, response.strip())
+            match = re.search(pattern, response.strip(), re.IGNORECASE)
             if match:
-                letter = match.group(1)
-                # Ensure the extracted letter is A-E
-                if letter in "ABCDE":
-                    return letter
+                prediction = match.group(1).lower()  # Convert to lowercase for "yes"/"no"
+                
+                # Validate the extracted prediction
+                if prediction in "abcde12345" or prediction in {"yes", "no"}:
+                    return prediction.lower() if prediction in {"yes", "no"} else prediction.upper()
 
         # Return None if no valid pattern is matched
         return None

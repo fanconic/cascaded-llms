@@ -142,7 +142,7 @@ class Experiment:
         prompts = batch["prompts"]
 
         for i, decision in enumerate(batch_decisions):
-            self._update_collectors(collectors, decision, batch["answer"][i][0])
+            self._update_collectors(collectors, decision, batch["answer"][i])
 
             if self.sft_trainers:
                 self._update_sft_trainers(

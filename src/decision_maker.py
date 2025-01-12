@@ -268,12 +268,12 @@ class AIDecisionSystem:
                 large_uncertainties[i].item(),
                 base_response,
                 large_response,
-                expert_responses[i][0],
+                expert_responses[i],
             )
 
             is_correct = None
             if self.online_enable:
-                is_correct = final_answer.strip() == expert_responses[i][0].strip()
+                is_correct = final_answer.strip() == expert_responses[i].strip()
                 self._update_parameters(decision, is_correct)
 
             decisions.append(
