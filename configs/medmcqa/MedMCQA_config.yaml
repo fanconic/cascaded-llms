@@ -29,9 +29,9 @@ sft:
 verification_fn: surrogate_token_probs
 uncertainty_fn: per_token_entropy
 dataset:
-  name: HuggingSara/medqa
+  name: openlifescienceai/medmcqa
   subset: 
   split: validation
   num_samples: -1
-device: cuda:2
+device: cuda:1
 name_postfix: llama_3_8_validation

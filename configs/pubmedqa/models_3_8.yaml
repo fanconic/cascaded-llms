@@ -1,23 +1,23 @@
 seed: 42
 results_dir: results
-max_new_tokens: 3 #Keep it small to start with
+max_new_tokens: 5 #Keep it small to start with
 base_gen_cost: 1.0
 large_inf_cost: 1.0
 large_gen_cost: 25.0
 expert_cost: 100.0
 #base_model: HuggingFaceTB/SmolLM-1.7B-Instruct
 base_model: meta-llama/Llama-3.2-1B-Instruct
-large_model: meta-llama/Llama-3.1-3B-Instruct
+large_model: meta-llama/Llama-3.1-8B-Instruct
 #large_model: /mnt/pdata/caf83/helm/me-llama/physionet.org/files/me-llama/1.0.0/MeLLaMA-13B-chat
 batch_size: 7
 max_input_length: 512
 online:
   enable: false
-  initial_uncertainty_threshold_base: 300
-  initial_uncertainty_threshold_large: 300
+  initial_uncertainty_threshold_base: 500
+  initial_uncertainty_threshold_large: 500
   initial_M: 1.0
-  lr_tau: 0.1
-  lr_M: 0.1
+  lr_tau: 0.01
+  lr_M: 0.01
   error_penalty: 10
 sft:
   enable: false
@@ -29,9 +29,9 @@ sft:
 verification_fn: surrogate_token_probs
 uncertainty_fn: per_token_entropy
 dataset:
-  name: allenai/ai2_arc
-  subset: ARC-Easy
-  split: test
+  name: HuggingSara/medqa
+  subset: 
+  split: validation
   num_samples: -1
-device: cuda:2
-name_postfix: ai2arc_easy_1_3
+device: cuda:0
+name_postfix: medqa_models_3_8
