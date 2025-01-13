@@ -296,7 +296,8 @@ class Experiment:
 
         plot_tau_M(
             self.run_dir,
-            data[["tau_base", "tau_large", "M"]],
+            #data[["tau_base", "tau_large", "M"]],
+            data[["M"]],
         )
 
         # Save metrics

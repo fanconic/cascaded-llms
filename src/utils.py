@@ -124,8 +124,8 @@ def plot_tau_M(run_dir, decisions):
     # Option 1: Rename columns before plotting
     decisions_renamed = decisions.copy()
     decisions_renamed.columns = [
-        r"$\tau_{\text{base}}$",
-        r"$\tau_{\text{large}}$",
+        #r"$\tau_{\text{base}}$",
+        #r"$\tau_{\text{large}}$",
         "$M$",
     ]
     decisions_renamed.plot(kind="line")

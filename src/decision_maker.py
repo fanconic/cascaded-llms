@@ -223,11 +223,11 @@ class AIDecisionSystem:
         elif decision == 1:  # used large model
             if is_correct:
                 dM += 1.0
-            else:
-                dTau_large -= 1.0
-        elif decision == 2:  # expert
-            dTau_base -= 0.1
-            dTau_large -= 0.1
+        #     else:
+        #         dTau_large -= 1.0
+        # elif decision == 2:  # expert
+        #     dTau_base -= 0.1
+        #     dTau_large -= 0.1
 
         self.M = max(1e-3, self.M + self.lr_M * dM)
         self.tau_base = max(0.0, self.tau_base + self.lr_tau * dTau_base)
