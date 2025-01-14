@@ -12,10 +12,10 @@ large_model: meta-llama/Llama-3.1-8B-Instruct
 batch_size: 7
 max_input_length: 512
 online:
-  enable: true
+  enable: false
   initial_uncertainty_threshold_base: 300
   initial_uncertainty_threshold_large: 300
-  initial_M: 1.0
+  initial_M: 0.5
   lr_tau: 0.1
   lr_M: 0.005
   error_penalty: 10

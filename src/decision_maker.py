@@ -64,12 +64,15 @@ class AIDecisionSystem:
         self.uncertainty_fn = uncertainty_fn
 
         # Initialize models
-        self.base_model, self.base_tokenizer = self._initialize_model(
-            base_model_path, "Small"
-        )
-        self.large_model, self.large_tokenizer = self._initialize_model(
-            large_model_path, "Large"
-        )
+        if not self.config.precomputed:
+            self.base_model, self.base_tokenizer = self._initialize_model(
+                base_model_path, "Small"
+            )
+            self.large_model, self.large_tokenizer = self._initialize_model(
+                large_model_path, "Large"
+            )
+        else:
+            print("Generations have been precomputed")
 
     def _initialize_model(
         self, model_path: str, model_name: str
@@ -263,8 +266,12 @@ class AIDecisionSystem:
             large_outputs = precomputed_batch["large_response"].astype(str).tolist()
             base_probs = torch.Tensor(precomputed_batch["base_prob"].values)
             large_probs_for_base = torch.Tensor(precomputed_batch["large_prob"].values)
-            base_uncertainties = torch.Tensor(precomputed_batch["base_uncertainty"].values)
-            large_uncertainties = torch.Tensor(precomputed_batch["large_uncertainty"].values)
+            base_uncertainties = torch.Tensor(
+                precomputed_batch["base_uncertainty"].values
+            )
+            large_uncertainties = torch.Tensor(
+                precomputed_batch["large_uncertainty"].values
+            )
 
         ratio = large_probs_for_base / (base_probs * self.M)
         acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)

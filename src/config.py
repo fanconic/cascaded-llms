@@ -21,6 +21,7 @@ class ModelConfig:
     max_new_tokens: int = 256
     device: str = "cpu"
     prompt_template: str = ""
+    precomputed: bool = False
 
 
 @dataclass
@@ -44,6 +45,7 @@ class ExperimentConfig:
     max_input_length: int
     max_new_tokens: int
     device: str
+    precomputed: bool
 
     def __post_init__(self):
         self.verification_fn = VERIFICATION_FN_MAPPING[self.verification_fn]

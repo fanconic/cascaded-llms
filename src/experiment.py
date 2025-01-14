@@ -34,6 +34,7 @@ class Experiment:
             max_input_length=cfg.max_input_length,
             max_new_tokens=cfg.max_new_tokens,
             device=cfg.device,
+            precomputed=cfg.precomputed.enable,
         )
 
         cost_config = {

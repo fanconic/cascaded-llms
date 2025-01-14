@@ -27,6 +27,7 @@ class DecisionMakerFactory:
             max_input_length=exp_config.max_input_length,
             max_new_tokens=exp_config.max_new_tokens,
             device=exp_config.device,
+            precomputed=exp_config.precomputed,
         )
 
         cost_config_obj = CostConfig(**cost_config)
