@@ -17,14 +17,15 @@ class MedQAPreprocessor(DatasetPreprocessor):
     @staticmethod
     def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
         prompt_template = "You are a medical doctor taking the US Medical Licensing Examination. You need to demonstrate your understanding of basic and clinical science, medical knowledge, and mechanisms underlying health, disease, patient care, and modes of therapy. Show your ability to apply the knowledge essential for medical practice. For the following multiple-choice question, select one correct answer from 0,1,2,3,4. Base your answer on the current and standard practices referenced in medical guidelines."
-        class_labels = {"A": "0", "B": "1", "C": "2", "D":"3", "E":"4"}
+        class_labels = {"A": "0", "B": "1", "C": "2", "D": "3", "E": "4"}
+
         def preprocess_example(example):
             option = {
                 "0": example["options"]["A"],
-                "1": example["options"]["B"], 
-                "2": example["options"]["C"], 
-                "3": example["options"]["D"], 
-                "4": example["options"]["E"], 
+                "1": example["options"]["B"],
+                "2": example["options"]["C"],
+                "3": example["options"]["D"],
+                "4": example["options"]["E"],
             }
             option = str(option).replace("'", "")
             prompt = f"{prompt_template}\n\nQuestion: {example['question']}\n\nOptions:{option}\n\nAnswer: "
@@ -40,17 +41,23 @@ class MedQAPreprocessor(DatasetPreprocessor):
             return example
 
         return dataset.map(preprocess_example, batched=False)
-    
-    
+
+
 class MedMCQAPreprocessor(DatasetPreprocessor):
     """Preprocessing logic for MedMCQA dataset."""
 
     @staticmethod
     def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
         prompt_template = "You are a medical doctor answering realworld medical entrance exam questions. Based on your understanding of basic and clinical science, medical knowledge, and mechanisms underlying health, disease, patient care, and modes of therapy, answer the following multiple-choice question. Select one correct answer from 0,1,2,3. Base your answer on the current and standard practices referenced in medical guidelines."
-        class_labels = {0: "0", 1: "1", 2: "2", 3:"3"}
+        class_labels = {0: "0", 1: "1", 2: "2", 3: "3"}
+
         def preprocess_example(example):
-            option = {'0': example["opa"], '1': example["opb"], '2': example["opc"], '3': example["opd"]}
+            option = {
+                "0": example["opa"],
+                "1": example["opb"],
+                "2": example["opc"],
+                "3": example["opd"],
+            }
             option = str(option).replace("'", "")
             prompt = f"{prompt_template}\n\nQuestion: {example['question']}\n\nOptions:{option}\n\nAnswer: "
 
@@ -72,8 +79,8 @@ class MedMCQAPreprocessor(DatasetPreprocessor):
             return example
 
         return dataset.map(preprocess_example, batched=False)
-    
-    
+
+
 class PubMedQAPreprocessor(DatasetPreprocessor):
     """Preprocessing logic for PubMedQA dataset."""
 
@@ -83,7 +90,10 @@ class PubMedQAPreprocessor(DatasetPreprocessor):
 
         def preprocess_example(example):
             context = (" ").join(example["context"]["contexts"])
-            prompt = f"{prompt_template}\n\nABSTRACT:{context}\n\n\INPUT: {example['question']}\n\n" + "OPTIONS: {yes, no}\n\nAnswer: "
+            prompt = (
+                f"{prompt_template}\n\nABSTRACT:{context}\n\n\INPUT: {example['question']}\n\n"
+                + "OPTIONS: {yes, no}\n\nAnswer: "
+            )
 
             questions = prompt
             example["prompts"] = prompt
@@ -106,10 +116,18 @@ class ARC2AIPreprocessor(DatasetPreprocessor):
     def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
 
         prompt_template = "Please answer with one of the option in the bracket"
-        
+
         label2number = {
-            "A": "1", "B": "2", "C": "3", "D": "4", "E":"5",
-            "1": "1", "2": "2", "3": "3", "4": "4", "5":"5"
+            "A": "1",
+            "B": "2",
+            "C": "3",
+            "D": "4",
+            "E": "5",
+            "1": "1",
+            "2": "2",
+            "3": "3",
+            "4": "4",
+            "5": "5",
         }
 
         def preprocess_example(example):
@@ -139,7 +157,7 @@ class DefaultPreprocessor(DatasetPreprocessor):
     """Default preprocessing logic for unknown datasets."""
 
     prompt_template = "Please answer with one of the option in the bracket"
-    
+
     @staticmethod
     def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
         def preprocess_example(example):

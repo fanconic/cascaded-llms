@@ -49,6 +49,9 @@ class Experiment:
 
         self.sft_trainers = self._initialize_sft() if cfg.sft.enable else None
 
+        if self.cfg.precomputed.enable:
+            self.precomputed_df = pd.read_csv(self.cfg.precomputed.path)
+
     def _load_dataset(self):
         if self.cfg.dataset.subset:
             dataset = load_dataset(
@@ -112,10 +115,30 @@ class Experiment:
             "u": [],
         }
 
+        precomputed_batch = None
+        batch_idx = 0
         for batch in tqdm(dataloader):
+            if self.cfg.precomputed.enable:
+                precomputed_batch = self.precomputed_df.loc[
+                    batch_idx : batch_idx + len(batch["answer"]) - 1,
+                    [
+                        "base_response",
+                        "large_response",
+                        "base_prob",
+                        "large_prob",
+                        "base_uncertainty",
+                        "large_uncertainty",
+                    ],
+                ]
+                batch_idx += len(batch["answer"])
+
             batch_decisions, small_predictions, large_predictions = (
                 self.decision_system.decide_batch(
-                    batch["prompts"], batch["answer"], batch["questions"]
+                    batch["prompts"],
+                    batch["answer"],
+                    batch["questions"],
+                    precomputed=self.cfg.precomputed.enable,
+                    precomputed_batch=precomputed_batch,
                 )
             )
 
@@ -296,7 +319,7 @@ class Experiment:
 
         plot_tau_M(
             self.run_dir,
-            #data[["tau_base", "tau_large", "M"]],
+            # data[["tau_base", "tau_large", "M"]],
             data[["M"]],
         )
 

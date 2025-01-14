@@ -34,11 +34,17 @@ def extract_predictions(response: str) -> str:
         for pattern in patterns:
             match = re.search(pattern, response.strip(), re.IGNORECASE)
             if match:
-                prediction = match.group(1).lower()  # Convert to lowercase for "yes"/"no"
-                
+                prediction = match.group(
+                    1
+                ).lower()  # Convert to lowercase for "yes"/"no"
+
                 # Validate the extracted prediction
                 if prediction in "abcde012345" or prediction in {"yes", "no"}:
-                    return prediction.lower() if prediction in {"yes", "no"} else prediction.upper()
+                    return (
+                        prediction.lower()
+                        if prediction in {"yes", "no"}
+                        else prediction.upper()
+                    )
 
         # Return None if no valid pattern is matched
         return None
@@ -124,8 +130,8 @@ def plot_tau_M(run_dir, decisions):
     # Option 1: Rename columns before plotting
     decisions_renamed = decisions.copy()
     decisions_renamed.columns = [
-        #r"$\tau_{\text{base}}$",
-        #r"$\tau_{\text{large}}$",
+        # r"$\tau_{\text{base}}$",
+        # r"$\tau_{\text{large}}$",
         "$M$",
     ]
     decisions_renamed.plot(kind="line")

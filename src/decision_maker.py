@@ -238,18 +238,33 @@ class AIDecisionSystem:
         prompts: List[str],
         expert_responses: List[List[str]],
         questions: List[str],
+        precomputed=False,
+        precomputed_batch=None,
     ) -> Tuple[List[Dict[str, Any]], List[str], List[str]]:
         """Process a batch of prompts and make decisions with optional online learning."""
-        base_outputs = self.generate_response(
-            self.base_model, self.base_tokenizer, prompts
-        )
-        large_outputs = self.generate_response(
-            self.large_model, self.large_tokenizer, prompts
-        )
 
-        base_probs, large_probs_for_base, base_uncertainties, large_uncertainties = (
-            self._evaluate_models(prompts, questions, base_outputs, large_outputs)
-        )
+        if not precomputed and precomputed_batch:
+            base_outputs = self.generate_response(
+                self.base_model, self.base_tokenizer, prompts
+            )
+            large_outputs = self.generate_response(
+                self.large_model, self.large_tokenizer, prompts
+            )
+
+            (
+                base_probs,
+                large_probs_for_base,
+                base_uncertainties,
+                large_uncertainties,
+            ) = self._evaluate_models(prompts, questions, base_outputs, large_outputs)
+
+        else:
+            base_outputs = precomputed_batch["base_response"].astype(str).tolist()
+            large_outputs = precomputed_batch["large_response"].astype(str).tolist()
+            base_probs = torch.Tensor(precomputed_batch["base_prob"].values)
+            large_probs_for_base = torch.Tensor(precomputed_batch["large_prob"].values)
+            base_uncertainties = torch.Tensor(precomputed_batch["base_uncertainty"].values)
+            large_uncertainties = torch.Tensor(precomputed_batch["large_uncertainty"].values)
 
         ratio = large_probs_for_base / (base_probs * self.M)
         acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)
