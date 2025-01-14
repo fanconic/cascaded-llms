@@ -27,7 +27,7 @@ sft:
   lora_alpha: 64
   lora_dropout: 0.1
 verification_fn: surrogate_token_probs
-uncertainty_fn: per_token_entropy
+uncertainty_fn: verdict_distribution_entropy
 dataset:
   name: openlifescienceai/medmcqa
   subset: 
@@ -35,3 +35,6 @@ dataset:
   num_samples: -1
 device: cuda:1
 name_postfix: medmcqa_expert_1_3
+precomputed:
+  enable: false
+  path: /home/

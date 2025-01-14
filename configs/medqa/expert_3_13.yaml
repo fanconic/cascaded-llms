@@ -26,7 +26,7 @@ sft:
   lora_alpha: 64
   lora_dropout: 0.1
 verification_fn: surrogate_token_probs
-uncertainty_fn: per_token_entropy
+uncertainty_fn: verdict_distribution_entropy
 dataset:
   name: HuggingSara/medqa
   subset: 
@@ -34,3 +34,6 @@ dataset:
   num_samples: -1
 device: cuda:0
 name_postfix: medqa_expert_3_13
+precomputed:
+  enable: false
+  path: /home/

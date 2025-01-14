@@ -13,9 +13,9 @@ batch_size: 7
 max_input_length: 512
 online:
   enable: false
-  initial_uncertainty_threshold_base: 300
-  initial_uncertainty_threshold_large: 300
-  initial_M: 0.5
+  initial_uncertainty_threshold_base: 2.0
+  initial_uncertainty_threshold_large: 2.0
+  initial_M: 1
   lr_tau: 0.1
   lr_M: 0.005
   error_penalty: 10
@@ -27,14 +27,14 @@ sft:
   lora_alpha: 64
   lora_dropout: 0.1
 verification_fn: surrogate_token_probs
-uncertainty_fn: per_token_entropy
+uncertainty_fn: verdict_distribution_entropy
 precomputed:
-  enable: true
+  enable: false
   path: /home/azureuser/caf83/helm/results/run_20250113_133221_medqa_models_3_8/results_medqa_models_3_8.csv
 dataset:
   name: HuggingSara/medqa
   subset: 
   split: validation
-  num_samples: -1
-device: cuda:0
+  num_samples: 105
+device: cuda:1
 name_postfix: debug

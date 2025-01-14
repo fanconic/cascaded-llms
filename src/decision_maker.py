@@ -246,7 +246,7 @@ class AIDecisionSystem:
     ) -> Tuple[List[Dict[str, Any]], List[str], List[str]]:
         """Process a batch of prompts and make decisions with optional online learning."""
 
-        if not precomputed and precomputed_batch:
+        if not precomputed and precomputed_batch is None:
             base_outputs = self.generate_response(
                 self.base_model, self.base_tokenizer, prompts
             )

@@ -99,3 +99,82 @@ def per_token_entropy(
         batch_entropies[i] = region_entropy
 
     return batch_entropies
+
+
+def verdict_distribution_entropy(
+    model,
+    tokenizer,
+    prompts,
+    generated_responses,
+    verdict_tokens=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+    device="cuda",
+    max_length=512,
+    normalize_by_length=True,
+):
+    """
+    Computes an 'uncertainty entropy' from a single forward pass over a
+    short 'verification prompt' that asks the model to choose one verdict
+    from the specified 'verdict_tokens'.
+    
+    :param model: A (decoder) language model, e.g. GPT-style or an encoder-decoder
+                  that returns `outputs.logits`.
+    :param tokenizer: HuggingFace tokenizer for the given model.
+    :param prompts: List[str]. The original user prompts/questions.
+    :param generated_responses: List[str]. The model's answers to be verified.
+    :param verdict_tokens: A list of short strings representing discrete verdicts.
+                          IMPORTANT: Each string should ideally tokenize to a *single* ID.
+    :param device: "cuda" or "cpu".
+    :param max_length: For safety if sequences get long; used in tokenizer calls.
+    
+    :return: A torch.FloatTensor of shape [batch_size], containing
+             the entropy of the distribution over verdict tokens.
+    """
+    assert len(prompts) == len(generated_responses), "Mismatch in batch sizes!"
+
+    # Convert each verdict token to a single token ID (assuming each maps to exactly 1 ID).
+    # If a verdict word splits into multiple tokens, you’ll need a more careful approach.
+    verdict_ids = []
+    for vt in verdict_tokens:
+        ids = tokenizer.encode(vt, add_special_tokens=False)
+        if len(ids) != 1:
+            raise ValueError(
+                f"Verdict token '{vt}' did not map to exactly 1 ID. Got: {ids}"
+            )
+        verdict_ids.append(ids[0])
+
+    batch_verification_prompts = []
+    for (p, r) in zip(prompts, generated_responses):
+        verification_text = (
+            "Given the following question and the model's answer, please evaluate certainty.\n\n"
+            f"Respond with a single token: {verdict_tokens} where 0 is the most uncertain, and 9 is the most certain\n\n"
+            f"Question:\n{p}\n\n"
+            f"model answer:\n{r}\n\n"
+            f"How certain are you that above answer is correct? Respond with exactly one token from "
+            f"{verdict_tokens}."
+            "Answer: "
+        )
+        batch_verification_prompts.append(verification_text)
+
+    # Tokenize in batch
+    inputs = tokenizer(
+        batch_verification_prompts,
+        padding=True,
+        truncation=True,
+        max_length=max_length,
+        return_tensors="pt",
+    ).to(device)
+
+    # Forward pass
+    with torch.no_grad():
+        outputs = model(**inputs)
+        last_logits = outputs.logits[:, -1, :]  # shape: [batch_size, vocab_size]
+
+    verdict_logits = last_logits[:, verdict_ids]  # shape: [batch_size, len(verdict_tokens)]
+
+    # Convert to distribution
+    verdict_log_probs = F.log_softmax(verdict_logits, dim=-1)  # shape: [batch_size, N]
+    verdict_probs = verdict_log_probs.exp()                    # shape: [batch_size, N]
+
+    verdict_entropy = -(verdict_probs * verdict_log_probs).sum(dim=-1)
+
+    return verdict_entropy

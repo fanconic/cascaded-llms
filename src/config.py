@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from src.uncertainty import per_token_entropy
+from src.uncertainty import per_token_entropy, verdict_distribution_entropy
 from src.verification import verbalisation, sequence_probability, surrogate_token_probs
 
 VERIFICATION_FN_MAPPING = {
@@ -10,6 +10,7 @@ VERIFICATION_FN_MAPPING = {
 
 UNCERTAINTY_FN_MAPPING = {
     "per_token_entropy": per_token_entropy,
+    "verdict_distribution_entropy": verdict_distribution_entropy
 }
 
 
