@@ -10,7 +10,7 @@ VERIFICATION_FN_MAPPING = {
 
 UNCERTAINTY_FN_MAPPING = {
     "per_token_entropy": per_token_entropy,
-    "verdict_distribution_entropy": verdict_distribution_entropy
+    "verdict_distribution_entropy": verdict_distribution_entropy,
 }
 
 

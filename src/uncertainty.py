@@ -29,6 +29,8 @@ def per_token_entropy(
     gen_lengths = []
 
     for prompt, gen_resp in zip(prompts, generated_responses):
+        if gen_resp is None:
+            gen_resp = "N/A"
         full_text = prompt + gen_resp
         prompt_ids = tokenizer(prompt, add_special_tokens=False).input_ids
         gen_ids = tokenizer(gen_resp, add_special_tokens=False).input_ids
@@ -115,7 +117,7 @@ def verdict_distribution_entropy(
     Computes an 'uncertainty entropy' from a single forward pass over a
     short 'verification prompt' that asks the model to choose one verdict
     from the specified 'verdict_tokens'.
-    
+
     :param model: A (decoder) language model, e.g. GPT-style or an encoder-decoder
                   that returns `outputs.logits`.
     :param tokenizer: HuggingFace tokenizer for the given model.
@@ -125,7 +127,7 @@ def verdict_distribution_entropy(
                           IMPORTANT: Each string should ideally tokenize to a *single* ID.
     :param device: "cuda" or "cpu".
     :param max_length: For safety if sequences get long; used in tokenizer calls.
-    
+
     :return: A torch.FloatTensor of shape [batch_size], containing
              the entropy of the distribution over verdict tokens.
     """
@@ -143,7 +145,7 @@ def verdict_distribution_entropy(
         verdict_ids.append(ids[0])
 
     batch_verification_prompts = []
-    for (p, r) in zip(prompts, generated_responses):
+    for p, r in zip(prompts, generated_responses):
         verification_text = (
             "Given the following question and the model's answer, please evaluate certainty.\n\n"
             f"Respond with a single token: {verdict_tokens} where 0 is the most uncertain, and 9 is the most certain\n\n"
@@ -169,11 +171,13 @@ def verdict_distribution_entropy(
         outputs = model(**inputs)
         last_logits = outputs.logits[:, -1, :]  # shape: [batch_size, vocab_size]
 
-    verdict_logits = last_logits[:, verdict_ids]  # shape: [batch_size, len(verdict_tokens)]
+    verdict_logits = last_logits[
+        :, verdict_ids
+    ]  # shape: [batch_size, len(verdict_tokens)]
 
     # Convert to distribution
     verdict_log_probs = F.log_softmax(verdict_logits, dim=-1)  # shape: [batch_size, N]
-    verdict_probs = verdict_log_probs.exp()                    # shape: [batch_size, N]
+    verdict_probs = verdict_log_probs.exp()  # shape: [batch_size, N]
 
     verdict_entropy = -(verdict_probs * verdict_log_probs).sum(dim=-1)
 

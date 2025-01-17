@@ -107,7 +107,7 @@ class AIDecisionSystem:
                 pad_token_id=tokenizer.pad_token_id,
                 do_sample=True,
                 temperature=0.3,
-                top_p=0.9
+                top_p=0.9,
             )
 
         return [
@@ -257,16 +257,22 @@ class AIDecisionSystem:
             large_outputs = self.generate_response(
                 self.large_model, self.large_tokenizer, prompts
             )
-            
-            base_predictions = [extract_predictions(base_output) for base_output in base_outputs]
-            large_predictions = [extract_predictions(large_output) for large_output in large_outputs]
+
+            base_predictions = [
+                extract_predictions(base_output) for base_output in base_outputs
+            ]
+            large_predictions = [
+                extract_predictions(large_output) for large_output in large_outputs
+            ]
 
             (
                 base_probs,
                 large_probs_for_base,
                 base_uncertainties,
                 large_uncertainties,
-            ) = self._evaluate_models(prompts, questions, base_predictions, large_predictions)
+            ) = self._evaluate_models(
+                prompts, questions, base_predictions, large_predictions
+            )
 
         else:
             base_outputs = precomputed_batch["base_prediction"].astype(str).tolist()
@@ -326,6 +332,5 @@ class AIDecisionSystem:
                     "u": u,
                 }
             )
-
 
         return decisions

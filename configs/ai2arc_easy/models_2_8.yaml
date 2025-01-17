@@ -1,6 +1,6 @@
 seed: 42
 results_dir: results
-max_new_tokens: 5 #Keep it small to start with
+max_new_tokens: 512 #Keep it small to start with
 base_gen_cost: 1.0
 large_inf_cost: 1.0
 large_gen_cost: 25.0
@@ -35,3 +35,6 @@ dataset:
   num_samples: -1
 device: cuda:2
 name_postfix: ai2arc_easy_models_2_8
+precomputed:
+  enable: false
+  path: /home/azureuser/caf83/helm/results/run_20250113_133221_medqa_models_3_8/results_medqa_models_3_8.csv

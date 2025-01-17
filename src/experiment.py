@@ -96,28 +96,28 @@ class Experiment:
 
     def _collect_results(self, dataloader: DataLoader) -> Dict:
         collectors = {
-            "decisions" : [],
-            "responses" : [],
-            "base_responses" : [],
-            "large_responses" : [],
-            "predictions" : [],
-            "base_predictions" : [],
-            "large_predictions" : [],
-            "labels" : [],          
+            "decisions": [],
+            "responses": [],
+            "base_responses": [],
+            "large_responses": [],
+            "predictions": [],
+            "base_predictions": [],
+            "large_predictions": [],
+            "labels": [],
             # MvM defferal
-            "u" : [],
-            "M" : [],
-            "acceptance_ratios" : [],
-            "base_prob" : [],
-            "large_prob" : [],
+            "u": [],
+            "M": [],
+            "acceptance_ratios": [],
+            "base_prob": [],
+            "large_prob": [],
             # MvH defferal
-            "uncerts" : [],
-            "base_uncerts" : [],
-            "large_uncerts" : [],
-            "tau_base" : [],
-            "tau_large" : [],
+            "uncerts": [],
+            "base_uncerts": [],
+            "large_uncerts": [],
+            "tau_base": [],
+            "tau_large": [],
             # Costs
-            "costs" : [],
+            "costs": [],
         }
 
         precomputed_batch = None
@@ -137,14 +137,12 @@ class Experiment:
                 ]
                 batch_idx += len(batch["answer"])
 
-            batch_decisions = (
-                self.decision_system.decide_batch(
-                    batch["prompts"],
-                    batch["answer"],
-                    batch["questions"],
-                    precomputed=self.cfg.precomputed.enable,
-                    precomputed_batch=precomputed_batch,
-                )
+            batch_decisions = self.decision_system.decide_batch(
+                batch["prompts"],
+                batch["answer"],
+                batch["questions"],
+                precomputed=self.cfg.precomputed.enable,
+                precomputed_batch=precomputed_batch,
             )
 
             self._process_batch_results(
@@ -185,24 +183,23 @@ class Experiment:
         collectors["base_predictions"].append(decision["base_prediction"])
         collectors["large_predictions"].append(decision["large_prediction"])
         collectors["labels"].append(label)
-        
+
         # MvM defferal
         collectors["u"].append(decision["u"])
         collectors["M"].append(decision["M"])
         collectors["acceptance_ratios"].append(decision["acceptance_ratios"])
         collectors["base_prob"].append(decision["base_probs"])
         collectors["large_prob"].append(decision["large_probs"])
-        
+
         # MvH defferal
         collectors["uncerts"].append(decision["uncertainty"])
         collectors["base_uncerts"].append(decision["base_uncertainty"])
         collectors["large_uncerts"].append(decision["large_uncertainty"])
         collectors["tau_base"].append(decision["tau_base"])
         collectors["tau_large"].append(decision["tau_large"])
-        
+
         # Costs
         collectors["costs"].append(decision["cost"])
-        
 
     def _create_dataframe_dict(self, collectors: Dict) -> Dict:
         """Create dictionary for DataFrame creation from collectors."""
@@ -225,7 +222,7 @@ class Experiment:
             "large_uncertainty": collectors["large_uncerts"],
             "tau_base": collectors["tau_base"],
             "tau_large": collectors["tau_large"],
-            "cost": collectors["costs"], 
+            "cost": collectors["costs"],
         }
 
     def _analyze_and_save_results(self, results: Dict):
@@ -488,9 +485,10 @@ class Experiment:
             f"\nLarge Model Path ({outcomes['LM_Path_Total']} samples, {outcomes['LM_Path_Total']/total*100:.1f}%):"
         )
         lm_total_direct = outcomes["LM_Direct_Correct"] + outcomes["LM_Direct_Wrong"]
-        print(
-            f"├── Direct Decisions ({lm_total_direct} samples, {lm_total_direct/outcomes['LM_Path_Total']*100:.1f}%):"
-        )
+        if outcomes["LM_Path_Total"] > 0:
+            print(
+                f"├── Direct Decisions ({lm_total_direct} samples, {lm_total_direct/outcomes['LM_Path_Total']*100:.1f}%):"
+            )
         if lm_total_direct > 0:
             print(
                 f"│   ├── Correct: {outcomes['LM_Direct_Correct']} ({outcomes['LM_Direct_Correct']/lm_total_direct*100:.1f}%)"
@@ -501,9 +499,10 @@ class Experiment:
         lm_total_escalated = (
             outcomes["LM_Necessary_Expert"] + outcomes["LM_Unnecessary_Expert"]
         )
-        print(
-            f"└── Expert Escalations: ({lm_total_escalated} samples, {lm_total_escalated/outcomes['LM_Path_Total']*100:.1f}%):"
-        )
+        if outcomes["LM_Path_Total"] > 0:
+            print(
+                f"└── Expert Escalations: ({lm_total_escalated} samples, {lm_total_escalated/outcomes['LM_Path_Total']*100:.1f}%):"
+            )
         if lm_total_escalated > 0:
             print(
                 f"    ├── Necessary Escalated: {outcomes['LM_Necessary_Expert']} ({outcomes['LM_Necessary_Expert']/lm_total_escalated*100:.1f}%)"

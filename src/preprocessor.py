@@ -33,7 +33,7 @@ Let's reason step-by-step, then conclude with: "The best answer is: <X>"
 Reasoning:
 """
 
-        question_template="""Question: {question}
+        question_template = """Question: {question}
 
 Choices:
 {choice_0}
@@ -42,30 +42,30 @@ Choices:
 {choice_3}
 {choice_4}
 """
-        
 
         def preprocess_example(example):
             prompt = prompt_template.format(
-                question=example['question'], 
-                choice_0 = "A) " +example["options"]["A"],
-                choice_1 = "B) " +example["options"]["B"],
-                choice_2 = "C) " +example["options"]["C"],
-                choice_3 = "D) " +example["options"]["D"],
-                choice_4 = "E) " +example["options"]["E"])
+                question=example["question"],
+                choice_0="A) " + example["options"]["A"],
+                choice_1="B) " + example["options"]["B"],
+                choice_2="C) " + example["options"]["C"],
+                choice_3="D) " + example["options"]["D"],
+                choice_4="E) " + example["options"]["E"],
+            )
 
             questions = question_template.format(
-                question=example['question'], 
-                choice_0 = "A) " +example["options"]["A"],
-                choice_1 = "B) " +example["options"]["B"],
-                choice_2 = "C) " +example["options"]["C"],
-                choice_3 = "D) " +example["options"]["D"],
-                choice_4 = "E) " +example["options"]["E"]
+                question=example["question"],
+                choice_0="A) " + example["options"]["A"],
+                choice_1="B) " + example["options"]["B"],
+                choice_2="C) " + example["options"]["C"],
+                choice_3="D) " + example["options"]["D"],
+                choice_4="E) " + example["options"]["E"],
             )
-            
+
             example["prompts"] = prompt
             example["questions"] = questions
-            example["answer"] =example["answer_idx"]
-            
+            example["answer"] = example["answer_idx"]
+
             del example["question"]
             del example["answer_idx"]
             del example["meta_info"]
@@ -96,7 +96,7 @@ Let's reason step-by-step, then conclude with: "The best answer is: <X>"
 Reasoning:
 """
 
-        question_template="""Question: {question}
+        question_template = """Question: {question}
 
 Choices:
 {choice_0}
@@ -108,21 +108,21 @@ Choices:
 
         def preprocess_example(example):
             prompt = prompt_template.format(
-                question=example['question'], 
-                choice_0 = "A) " +example["opa"],
-                choice_1 = "B) " +example["opb"],
-                choice_2 = "C) " +example["opc"],
-                choice_3 = "D) " +example["opd"]
+                question=example["question"],
+                choice_0="A) " + example["opa"],
+                choice_1="B) " + example["opb"],
+                choice_2="C) " + example["opc"],
+                choice_3="D) " + example["opd"],
             )
 
             questions = question_template.format(
-                question=example['question'], 
-                choice_0 = "A) " +example["opa"],
-                choice_1 = "B) " +example["opb"],
-                choice_2 = "C) " +example["opc"],
-                choice_3 = "D) " +example["opd"]
+                question=example["question"],
+                choice_0="A) " + example["opa"],
+                choice_1="B) " + example["opb"],
+                choice_2="C) " + example["opc"],
+                choice_3="D) " + example["opd"],
             )
-            
+
             example["prompts"] = prompt
             example["questions"] = questions
             example["answer"] = class_labels[example["cop"]]
@@ -192,7 +192,7 @@ Let's reason step-by-step, then conclude with: "The best answer is: <X>"
 Reasoning:
 """
 
-        question_template="""Question: {question}
+        question_template = """Question: {question}
 
 Choices:
 {choice_0}
@@ -206,10 +206,12 @@ Choices:
             "B": "B",
             "C": "C",
             "D": "D",
+            "E": "E",
             "1": "A",
             "2": "B",
             "3": "C",
             "4": "D",
+            "5": "E",
         }
 
         def preprocess_example(example):
@@ -219,21 +221,63 @@ Choices:
                     example["choices"]["text"], example["choices"]["label"]
                 )
             }
-            prompt = prompt_template.format(
-                question=example['question'], 
-                choice_0 = "A) " +option["A"],
-                choice_1 = "B) " +option["B"],
-                choice_2 = "C) " +option["C"],
-                choice_3 = "D) " +option["D"]
-            )
+            if len(option) == 3:
+                prompt = prompt_template.format(
+                    question=example["question"],
+                    choice_0="A) " + option["A"],
+                    choice_1="B) " + option["B"],
+                    choice_2="C) " + option["C"],
+                    choice_3="",
+                    choice_4="",
+                )
 
-            questions = question_template.format(
-                question=example['question'], 
-                choice_0 = "A) " +option["A"],
-                choice_1 = "B) " +option["B"],
-                choice_2 = "C) " +option["C"],
-                choice_3 = "D) " +option["D"]
-            )
+                questions = question_template.format(
+                    question=example["question"],
+                    choice_0="A) " + option["A"],
+                    choice_1="B) " + option["B"],
+                    choice_2="C) " + option["C"],
+                    choice_3="",
+                    choice_4="",
+                )
+
+            elif len(option) == 5:
+                prompt = prompt_template.format(
+                    question=example["question"],
+                    choice_0="A) " + option["A"],
+                    choice_1="B) " + option["B"],
+                    choice_2="C) " + option["C"],
+                    choice_3="D) " + option["D"],
+                    choice_4="E) " + option["E"],
+                )
+
+                questions = question_template.format(
+                    question=example["question"],
+                    choice_0="A) " + option["A"],
+                    choice_1="B) " + option["B"],
+                    choice_2="C) " + option["C"],
+                    choice_3="D) " + option["D"],
+                    choice_4="E) " + option["E"],
+                )
+
+            else:
+                prompt = prompt_template.format(
+                    question=example["question"],
+                    choice_0="A) " + option["A"],
+                    choice_1="B) " + option["B"],
+                    choice_2="C) " + option["C"],
+                    choice_3="D) " + option["D"],
+                    choice_4="",
+                )
+
+                questions = question_template.format(
+                    question=example["question"],
+                    choice_0="A) " + option["A"],
+                    choice_1="B) " + option["B"],
+                    choice_2="C) " + option["C"],
+                    choice_3="D) " + option["D"],
+                    choice_4="",
+                )
+
             example["prompts"] = prompt
             example["questions"] = questions
             example["answer"] = label2number[example["answerKey"]]

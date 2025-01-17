@@ -67,7 +67,7 @@ def plot_accuracy_vs_cost(
     plt.figure(figsize=(5, 5))
 
     base_plot = plt.errorbar(
-        cost_base,
+        cost_base / data_length,
         accuracy_base,
         yerr=accuracy_base_err,
         label="Base Model",
@@ -75,7 +75,7 @@ def plot_accuracy_vs_cost(
         capsize=5,
     )
     large_plot = plt.errorbar(
-        cost_large,
+        cost_large / data_length,
         accuracy_large,
         yerr=accuracy_large_err,
         label="Large Model",
@@ -83,10 +83,10 @@ def plot_accuracy_vs_cost(
         capsize=5,
     )
     expert_plot = plt.errorbar(
-        expert_cost * data_length, 1.0, yerr=0.0, label="Expert", fmt="o", capsize=5
+        expert_cost, 1.0, yerr=0.0, label="Expert", fmt="o", capsize=5
     )
     dynamic_plot = plt.errorbar(
-        dynamic_cost,
+        dynamic_cost / data_length,
         dynamic_accuracy,
         yerr=dynamic_accuracy_err,
         label="Dynamic Decisions",
@@ -95,7 +95,7 @@ def plot_accuracy_vs_cost(
     )
 
     plt.plot(
-        [cost_base, cost_large, expert_cost * data_length],
+        [cost_base / data_length, cost_large / data_length, expert_cost],
         [accuracy_base, accuracy_large, 1.0],
         linestyle="--",
         color="gray",
