@@ -96,24 +96,28 @@ class Experiment:
 
     def _collect_results(self, dataloader: DataLoader) -> Dict:
         collectors = {
-            "decisions": [],
-            "outputs": [],
-            "acceptance_ratios": [],
-            "uncerts": [],
-            "costs": [],
-            "labels": [],
-            "predictions": [],
-            "acceptance_probs": [],
-            "base_uncerts": [],
-            "large_uncerts": [],
-            "base_prob": [],
-            "large_prob": [],
-            "all_small_predictions": [],
-            "all_large_predictions": [],
-            "tau_base": [],
-            "tau_large": [],
-            "M": [],
-            "u": [],
+            "decisions" : [],
+            "responses" : [],
+            "base_responses" : [],
+            "large_responses" : [],
+            "predictions" : [],
+            "base_predictions" : [],
+            "large_predictions" : [],
+            "labels" : [],          
+            # MvM defferal
+            "u" : [],
+            "M" : [],
+            "acceptance_ratios" : [],
+            "base_prob" : [],
+            "large_prob" : [],
+            # MvH defferal
+            "uncerts" : [],
+            "base_uncerts" : [],
+            "large_uncerts" : [],
+            "tau_base" : [],
+            "tau_large" : [],
+            # Costs
+            "costs" : [],
         }
 
         precomputed_batch = None
@@ -133,7 +137,7 @@ class Experiment:
                 ]
                 batch_idx += len(batch["answer"])
 
-            batch_decisions, small_predictions, large_predictions = (
+            batch_decisions = (
                 self.decision_system.decide_batch(
                     batch["prompts"],
                     batch["answer"],
@@ -145,8 +149,6 @@ class Experiment:
 
             self._process_batch_results(
                 batch_decisions,
-                small_predictions,
-                large_predictions,
                 batch,
                 collectors,
             )
@@ -156,13 +158,9 @@ class Experiment:
     def _process_batch_results(
         self,
         batch_decisions,
-        small_predictions,
-        large_predictions,
         batch,
         collectors,
     ):
-        collectors["all_small_predictions"].extend(small_predictions)
-        collectors["all_large_predictions"].extend(large_predictions)
         prompts = batch["prompts"]
 
         for i, decision in enumerate(batch_decisions):
@@ -180,59 +178,54 @@ class Experiment:
     def _update_collectors(self, collectors: Dict, decision: Dict, label: str) -> None:
         """Update result collectors with batch decision data."""
         collectors["decisions"].append(decision["decision"])
-        collectors["outputs"].append(decision["response"])
-        collectors["acceptance_ratios"].append(decision["acceptance_prob"])
+        collectors["responses"].append(decision["response"])
+        collectors["base_responses"].append(decision["base_response"])
+        collectors["large_responses"].append(decision["large_response"])
+        collectors["predictions"].append(decision["prediction"])
+        collectors["base_predictions"].append(decision["base_prediction"])
+        collectors["large_predictions"].append(decision["large_prediction"])
+        collectors["labels"].append(label)
+        
+        # MvM defferal
+        collectors["u"].append(decision["u"])
+        collectors["M"].append(decision["M"])
+        collectors["acceptance_ratios"].append(decision["acceptance_ratios"])
+        collectors["base_prob"].append(decision["base_probs"])
+        collectors["large_prob"].append(decision["large_probs"])
+        
+        # MvH defferal
         collectors["uncerts"].append(decision["uncertainty"])
         collectors["base_uncerts"].append(decision["base_uncertainty"])
         collectors["large_uncerts"].append(decision["large_uncertainty"])
-        collectors["costs"].append(decision["cost"])
-        collectors["labels"].append(label)
         collectors["tau_base"].append(decision["tau_base"])
         collectors["tau_large"].append(decision["tau_large"])
-        collectors["M"].append(decision["M"])
-
-        # Handle prediction extraction
-        pred_letter = (
-            extract_predictions(decision["response"].strip())
-            if decision["response"]
-            else None
-        )
-        collectors["predictions"].append(pred_letter)
-
-        collectors["base_prob"].append(decision["base_probs"])
-        collectors["large_prob"].append(decision["large_probs"])
-        collectors["acceptance_probs"].append(decision["acceptance_prob"])
-        collectors["u"].append(decision["u"])
+        
+        # Costs
+        collectors["costs"].append(decision["cost"])
+        
 
     def _create_dataframe_dict(self, collectors: Dict) -> Dict:
         """Create dictionary for DataFrame creation from collectors."""
         return {
             "decision": collectors["decisions"],
-            "output": collectors["outputs"],
-            "acceptance_ratio": collectors["acceptance_ratios"],
+            "output": collectors["responses"],
+            "prediction": collectors["predictions"],
+            "label": collectors["labels"],
+            "base_response": collectors["base_responses"],
+            "base_prediction": collectors["base_predictions"],
+            "large_response": collectors["large_responses"],
+            "large_prediction": collectors["large_predictions"],
+            "acceptance_ratios": collectors["acceptance_ratios"],
+            "M": collectors["M"],
+            "u": collectors["u"],
+            "base_prob": collectors["base_prob"],
+            "large_prob": collectors["large_prob"],
             "uncertainty": collectors["uncerts"],
             "base_uncertainty": collectors["base_uncerts"],
             "large_uncertainty": collectors["large_uncerts"],
-            "label": collectors["labels"],
-            "prediction": collectors["predictions"],
-            "cost": collectors["costs"],
-            "base_response": collectors["all_small_predictions"],
-            "base_prediction": [
-                extract_predictions(pred)
-                for pred in collectors["all_small_predictions"]
-            ],
-            "large_response": collectors["all_large_predictions"],
-            "large_prediction": [
-                extract_predictions(pred)
-                for pred in collectors["all_large_predictions"]
-            ],
-            "base_prob": collectors["base_prob"],
-            "large_prob": collectors["large_prob"],
-            "acceptance_prob": collectors["acceptance_probs"],
             "tau_base": collectors["tau_base"],
             "tau_large": collectors["tau_large"],
-            "M": collectors["M"],
-            "u": collectors["u"],
+            "cost": collectors["costs"], 
         }
 
     def _analyze_and_save_results(self, results: Dict):
@@ -547,7 +540,7 @@ class Experiment:
         Args:
             data: DataFrame containing decision outcomes with columns:
                 'decision', 'prediction', 'label', 'uncertainty',
-                'acceptance_prob', etc.
+                'acceptance_ratios', etc.
 
         Returns:
             Dictionary containing counts for each scenario
@@ -578,8 +571,8 @@ class Experiment:
             base_would_be_correct = row["base_prediction"] == row["label"]
             large_would_be_correct = row["large_prediction"] == row["label"]
 
-            # Determine which path was taken (based on acceptance_prob)
-            took_sm_path = row["u"] < row["acceptance_prob"]
+            # Determine which path was taken (based on acceptance_ratios)
+            took_sm_path = row["u"] < row["acceptance_ratios"]
 
             if took_sm_path:
                 outcomes["SM_Path_Total"] += 1

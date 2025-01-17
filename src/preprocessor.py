@@ -16,24 +16,56 @@ class MedQAPreprocessor(DatasetPreprocessor):
 
     @staticmethod
     def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
-        prompt_template = "You are a medical doctor taking the US Medical Licensing Examination. You need to demonstrate your understanding of basic and clinical science, medical knowledge, and mechanisms underlying health, disease, patient care, and modes of therapy. Show your ability to apply the knowledge essential for medical practice. For the following multiple-choice question, select one correct answer from 0,1,2,3,4. Base your answer on the current and standard practices referenced in medical guidelines."
-        class_labels = {"A": "0", "B": "1", "C": "2", "D": "3", "E": "4"}
+        prompt_template = """You are a medical doctor taking the US Medical Licensing Examination. 
+Answer the following multiple-choice question using step-by-step reasoning, then conclude with a final line stating the best answer.
+
+Question: {question}
+
+Choices:
+{choice_0}
+{choice_1}
+{choice_2}
+{choice_3}
+{choice_4}
+
+Let's reason step-by-step, then conclude with: "The best answer is: <X>"
+
+Reasoning:
+"""
+
+        question_template="""Question: {question}
+
+Choices:
+{choice_0}
+{choice_1}
+{choice_2}
+{choice_3}
+{choice_4}
+"""
+        
 
         def preprocess_example(example):
-            option = {
-                "0": example["options"]["A"],
-                "1": example["options"]["B"],
-                "2": example["options"]["C"],
-                "3": example["options"]["D"],
-                "4": example["options"]["E"],
-            }
-            option = str(option).replace("'", "")
-            prompt = f"{prompt_template}\n\nQuestion: {example['question']}\n\nOptions:{option}\n\nAnswer: "
+            prompt = prompt_template.format(
+                question=example['question'], 
+                choice_0 = "A) " +example["options"]["A"],
+                choice_1 = "B) " +example["options"]["B"],
+                choice_2 = "C) " +example["options"]["C"],
+                choice_3 = "D) " +example["options"]["D"],
+                choice_4 = "E) " +example["options"]["E"])
 
-            questions = f"{example['question']}\n\nOptions:{option}"
+            questions = question_template.format(
+                question=example['question'], 
+                choice_0 = "A) " +example["options"]["A"],
+                choice_1 = "B) " +example["options"]["B"],
+                choice_2 = "C) " +example["options"]["C"],
+                choice_3 = "D) " +example["options"]["D"],
+                choice_4 = "E) " +example["options"]["E"]
+            )
+            
             example["prompts"] = prompt
             example["questions"] = questions
-            example["answer"] = class_labels[example["answer_idx"]]
+            example["answer"] =example["answer_idx"]
+            
             del example["question"]
             del example["answer_idx"]
             del example["meta_info"]
@@ -48,20 +80,49 @@ class MedMCQAPreprocessor(DatasetPreprocessor):
 
     @staticmethod
     def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
-        prompt_template = "You are a medical doctor answering realworld medical entrance exam questions. Based on your understanding of basic and clinical science, medical knowledge, and mechanisms underlying health, disease, patient care, and modes of therapy, answer the following multiple-choice question. Select one correct answer from 0,1,2,3. Base your answer on the current and standard practices referenced in medical guidelines."
-        class_labels = {0: "0", 1: "1", 2: "2", 3: "3"}
+        prompt_template = """You are a medical doctor answering realworld medical entrance exam questions.
+Answer the following multiple-choice question using step-by-step reasoning, then conclude with a final line stating the best answer.
+
+Question: {question}
+
+Choices:
+{choice_0}
+{choice_1}
+{choice_2}
+{choice_3}
+
+Let's reason step-by-step, then conclude with: "The best answer is: <X>"
+
+Reasoning:
+"""
+
+        question_template="""Question: {question}
+
+Choices:
+{choice_0}
+{choice_1}
+{choice_2}
+{choice_3}
+"""
+        class_labels = {0: "A", 1: "B", 2: "C", 3: "D"}
 
         def preprocess_example(example):
-            option = {
-                "0": example["opa"],
-                "1": example["opb"],
-                "2": example["opc"],
-                "3": example["opd"],
-            }
-            option = str(option).replace("'", "")
-            prompt = f"{prompt_template}\n\nQuestion: {example['question']}\n\nOptions:{option}\n\nAnswer: "
+            prompt = prompt_template.format(
+                question=example['question'], 
+                choice_0 = "A) " +example["opa"],
+                choice_1 = "B) " +example["opb"],
+                choice_2 = "C) " +example["opc"],
+                choice_3 = "D) " +example["opd"]
+            )
 
-            questions = f"{example['question']}\n\nOptions:{option}"
+            questions = question_template.format(
+                question=example['question'], 
+                choice_0 = "A) " +example["opa"],
+                choice_1 = "B) " +example["opb"],
+                choice_2 = "C) " +example["opc"],
+                choice_3 = "D) " +example["opd"]
+            )
+            
             example["prompts"] = prompt
             example["questions"] = questions
             example["answer"] = class_labels[example["cop"]]
@@ -115,19 +176,40 @@ class ARC2AIPreprocessor(DatasetPreprocessor):
     @staticmethod
     def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
 
-        prompt_template = "Please answer with one of the option in the bracket"
+        prompt_template = """You are a helpful AI.
+Answer the following multiple-choice question using step-by-step reasoning, then conclude with a final line stating the best answer.
+
+Question: {question}
+
+Choices:
+{choice_0}
+{choice_1}
+{choice_2}
+{choice_3}
+
+Let's reason step-by-step, then conclude with: "The best answer is: <X>"
+
+Reasoning:
+"""
+
+        question_template="""Question: {question}
+
+Choices:
+{choice_0}
+{choice_1}
+{choice_2}
+{choice_3}
+"""
 
         label2number = {
-            "A": "1",
-            "B": "2",
-            "C": "3",
-            "D": "4",
-            "E": "5",
-            "1": "1",
-            "2": "2",
-            "3": "3",
-            "4": "4",
-            "5": "5",
+            "A": "A",
+            "B": "B",
+            "C": "C",
+            "D": "D",
+            "1": "A",
+            "2": "B",
+            "3": "C",
+            "4": "D",
         }
 
         def preprocess_example(example):
@@ -137,10 +219,21 @@ class ARC2AIPreprocessor(DatasetPreprocessor):
                     example["choices"]["text"], example["choices"]["label"]
                 )
             }
-            option = str(option).replace("'", "")
-            prompt = f"{prompt_template}\n\nQuestion: {example['question']}\n\nOptions:{option}\n\nAnswer: "
+            prompt = prompt_template.format(
+                question=example['question'], 
+                choice_0 = "A) " +option["A"],
+                choice_1 = "B) " +option["B"],
+                choice_2 = "C) " +option["C"],
+                choice_3 = "D) " +option["D"]
+            )
 
-            questions = f"{example['question']}\n\n Options:{option}"
+            questions = question_template.format(
+                question=example['question'], 
+                choice_0 = "A) " +option["A"],
+                choice_1 = "B) " +option["B"],
+                choice_2 = "C) " +option["C"],
+                choice_3 = "D) " +option["D"]
+            )
             example["prompts"] = prompt
             example["questions"] = questions
             example["answer"] = label2number[example["answerKey"]]

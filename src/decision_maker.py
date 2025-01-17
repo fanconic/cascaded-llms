@@ -17,6 +17,7 @@ from transformers import (
     PreTrainedTokenizer,
 )
 from src.config import ModelConfig, CostConfig, OnlineConfig
+from src.utils import extract_predictions
 
 
 class AIDecisionSystem:
@@ -104,6 +105,9 @@ class AIDecisionSystem:
                 **inputs,
                 max_new_tokens=self.config.max_new_tokens,
                 pad_token_id=tokenizer.pad_token_id,
+                do_sample=True,
+                temperature=0.3,
+                top_p=0.9
             )
 
         return [
@@ -115,8 +119,8 @@ class AIDecisionSystem:
         self,
         prompts: List[str],
         questions: List[str],
-        base_outputs: List[str],
-        large_outputs: List[str],
+        base_answer: List[str],
+        large_answer: List[str],
     ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         """Evaluate model outputs and compute probabilities and uncertainties."""
         base_probs = self.verification_fn(
@@ -124,7 +128,7 @@ class AIDecisionSystem:
             tokenizer=self.base_tokenizer,
             prompts=prompts,
             questions=questions,
-            generated_responses=base_outputs,
+            generated_responses=base_answer,
             device=self.config.device,
             normalize_by_length=True,
             prompt_template=self.config.prompt_template,
@@ -135,7 +139,7 @@ class AIDecisionSystem:
             tokenizer=self.large_tokenizer,
             prompts=prompts,
             questions=questions,
-            generated_responses=base_outputs,
+            generated_responses=base_answer,
             device=self.config.device,
             normalize_by_length=True,
             prompt_template=self.config.prompt_template,
@@ -145,7 +149,7 @@ class AIDecisionSystem:
             model=self.base_model,
             tokenizer=self.base_tokenizer,
             prompts=prompts,
-            generated_responses=base_outputs,
+            generated_responses=base_answer,
             device=self.config.device,
             normalize_by_length=True,
         )
@@ -154,7 +158,7 @@ class AIDecisionSystem:
             model=self.large_model,
             tokenizer=self.large_tokenizer,
             prompts=prompts,
-            generated_responses=large_outputs,
+            generated_responses=large_answer,
             device=self.config.device,
             normalize_by_length=True,
         )
@@ -253,17 +257,20 @@ class AIDecisionSystem:
             large_outputs = self.generate_response(
                 self.large_model, self.large_tokenizer, prompts
             )
+            
+            base_predictions = [extract_predictions(base_output) for base_output in base_outputs]
+            large_predictions = [extract_predictions(large_output) for large_output in large_outputs]
 
             (
                 base_probs,
                 large_probs_for_base,
                 base_uncertainties,
                 large_uncertainties,
-            ) = self._evaluate_models(prompts, questions, base_outputs, large_outputs)
+            ) = self._evaluate_models(prompts, questions, base_predictions, large_predictions)
 
         else:
-            base_outputs = precomputed_batch["base_response"].astype(str).tolist()
-            large_outputs = precomputed_batch["large_response"].astype(str).tolist()
+            base_outputs = precomputed_batch["base_prediction"].astype(str).tolist()
+            large_outputs = precomputed_batch["large_prediction"].astype(str).tolist()
             base_probs = torch.Tensor(precomputed_batch["base_prob"].values)
             large_probs_for_base = torch.Tensor(precomputed_batch["large_prob"].values)
             base_uncertainties = torch.Tensor(
@@ -277,8 +284,6 @@ class AIDecisionSystem:
         acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)
 
         decisions = []
-        base_model_predictions = []
-        large_model_predictions = []
 
         for i, _ in enumerate(prompts):
             base_response = base_outputs[i].strip()
@@ -302,14 +307,17 @@ class AIDecisionSystem:
                 {
                     "decision": decision,
                     "response": final_answer,
+                    "prediction": extract_predictions(final_answer),
                     "cost": cost,
                     "is_correct": is_correct,
                     "base_response": base_response,
                     "large_response": large_response,
+                    "base_prediction": base_predictions[i],
+                    "large_prediction": large_predictions[i],
                     "uncertainty": uncertainty,
                     "base_uncertainty": base_uncertainties[i].item(),
                     "large_uncertainty": large_uncertainties[i].item(),
-                    "acceptance_prob": acceptance_prob[i].item(),
+                    "acceptance_ratios": acceptance_prob[i].item(),
                     "base_probs": base_probs[i].item(),
                     "large_probs": large_probs_for_base[i].item(),
                     "tau_base": self.tau_base,
@@ -319,7 +327,5 @@ class AIDecisionSystem:
                 }
             )
 
-            base_model_predictions.append(base_response)
-            large_model_predictions.append(large_response)
 
-        return decisions, base_model_predictions, large_model_predictions
+        return decisions

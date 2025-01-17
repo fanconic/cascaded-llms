@@ -25,9 +25,6 @@ def extract_predictions(response: str) -> str:
         patterns = [
             r"The best answer is: (\w+)",  # "The best answer is: A" or "The best answer is: 1"
             r"The best answer is (\w+)",  # "The best answer is A" or "The best answer is 1"
-            r"^([A-E0-5])$",  # standalone single character A-E or 0-5
-            r"\b([A-E0-5])\b",  # single character A-E or 0-5 in a larger text
-            r"\b(yes|no)\b",  # exact match for "yes" or "no"
         ]
 
         # Loop through the patterns to find a match
@@ -39,7 +36,7 @@ def extract_predictions(response: str) -> str:
                 ).lower()  # Convert to lowercase for "yes"/"no"
 
                 # Validate the extracted prediction
-                if prediction in "abcde012345" or prediction in {"yes", "no"}:
+                if prediction in "abcde" or prediction in {"yes", "no"}:
                     return (
                         prediction.lower()
                         if prediction in {"yes", "no"}

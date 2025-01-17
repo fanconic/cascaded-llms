@@ -125,10 +125,10 @@ def surrogate_token_probs(
     verify_prompts = []
     for question, candidate_answer in zip(questions, generated_responses):
         text = (
-            "Given the following question and the model's answer, please evaluate correctness.\n\n"
+            "Given the following question and the model's answer, please evaluate correctness.\n"
             f"Respond with a single token: {yes_token} or {no_token}\n\n"
-            f"Question:\n{question}\n\n"
-            f"model answer:\n{candidate_answer}\n\n"
+            f"Question: {question}\n\n"
+            f"Model Answer: {candidate_answer}\n\n"
             f"Is this answer correct: {yes_token} or {no_token}?\n\n"
             "Answer: "
         )
