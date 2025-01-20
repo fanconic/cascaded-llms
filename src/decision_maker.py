@@ -275,8 +275,8 @@ class AIDecisionSystem:
             )
 
         else:
-            base_outputs = precomputed_batch["base_prediction"].astype(str).tolist()
-            large_outputs = precomputed_batch["large_prediction"].astype(str).tolist()
+            base_outputs = precomputed_batch["base_response"].astype(str).tolist()
+            large_outputs = precomputed_batch["large_response"].astype(str).tolist()
             base_probs = torch.Tensor(precomputed_batch["base_prob"].values)
             large_probs_for_base = torch.Tensor(precomputed_batch["large_prob"].values)
             base_uncertainties = torch.Tensor(
@@ -285,6 +285,8 @@ class AIDecisionSystem:
             large_uncertainties = torch.Tensor(
                 precomputed_batch["large_uncertainty"].values
             )
+            base_predictions = precomputed_batch["base_prediction"].astype(str).tolist()
+            large_predictions = precomputed_batch["large_prediction"].astype(str).tolist()
 
         ratio = large_probs_for_base / (base_probs * self.M)
         acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)
@@ -311,6 +313,7 @@ class AIDecisionSystem:
 
             decisions.append(
                 {
+                    "question": questions[i],
                     "decision": decision,
                     "response": final_answer,
                     "prediction": extract_predictions(final_answer),

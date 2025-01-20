@@ -96,6 +96,7 @@ class Experiment:
 
     def _collect_results(self, dataloader: DataLoader) -> Dict:
         collectors = {
+            "questions": [],
             "decisions": [],
             "responses": [],
             "base_responses": [],
@@ -133,6 +134,8 @@ class Experiment:
                         "large_prob",
                         "base_uncertainty",
                         "large_uncertainty",
+                        "base_prediction",
+                        "large_prediction",
                     ],
                 ]
                 batch_idx += len(batch["answer"])
@@ -175,6 +178,7 @@ class Experiment:
 
     def _update_collectors(self, collectors: Dict, decision: Dict, label: str) -> None:
         """Update result collectors with batch decision data."""
+        collectors["questions"].append(decision["question"])
         collectors["decisions"].append(decision["decision"])
         collectors["responses"].append(decision["response"])
         collectors["base_responses"].append(decision["base_response"])
@@ -204,6 +208,7 @@ class Experiment:
     def _create_dataframe_dict(self, collectors: Dict) -> Dict:
         """Create dictionary for DataFrame creation from collectors."""
         return {
+            "question": collectors["questions"],
             "decision": collectors["decisions"],
             "output": collectors["responses"],
             "prediction": collectors["predictions"],
