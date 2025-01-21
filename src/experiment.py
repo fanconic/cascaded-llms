@@ -9,7 +9,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from src.utils import plot_accuracy_vs_cost, plot_decision_distribution, plot_tau_M
+from src.utils import plot_accuracy_vs_cost, plot_decision_distribution, plot_tau_M, plot_accuracy_vs_cost_D1
 from src.online_sft import OnlineSFTTrainerLoRA
 from src.config import ExperimentConfig
 from src.factory import DecisionMakerFactory
@@ -307,6 +307,22 @@ class Experiment:
             dynamic_cost,
             dynamic_accuracy,
             dynamic_accuracy_err,
+        )
+        
+        
+        plot_accuracy_vs_cost_D1(
+            self.run_dir,
+            cost_base,
+            accuracy_base,
+            accuracy_base_err,
+            cost_large,
+            accuracy_large,
+            accuracy_large_err,
+            len(data),
+            dynamic_cost,
+            dynamic_accuracy,
+            dynamic_accuracy_err,
+            delta_ibc_base2large
         )
 
         plot_decision_distribution(

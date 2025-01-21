@@ -102,11 +102,68 @@ def plot_accuracy_vs_cost(
         alpha=0.7,
     )
 
-    plt.xlabel("Total Cost")
+    plt.xlabel("Cost per Sample")
     plt.ylabel("Accuracy")
     plt.title("Accuracy vs Cost Curve")
     plt.legend()
     plt.savefig(os.path.join(run_dir, "accuracy_vs_cost.pdf"), bbox_inches="tight")
+    
+
+def plot_accuracy_vs_cost_D1(
+    run_dir,
+    cost_base,
+    accuracy_base,
+    accuracy_base_err,
+    cost_large,
+    accuracy_large,
+    accuracy_large_err,
+    data_length,
+    dynamic_cost,
+    dynamic_accuracy,
+    dynamic_accuracy_err,
+    delta_ibc
+):
+    plt.figure(figsize=(3, 3))
+
+    base_plot = plt.errorbar(
+        cost_base / data_length,
+        accuracy_base,
+        yerr=accuracy_base_err,
+        label="Base Model",
+        fmt="o",
+        capsize=5,
+    )
+    large_plot = plt.errorbar(
+        cost_large / data_length,
+        accuracy_large,
+        yerr=accuracy_large_err,
+        label="Large Model",
+        fmt="o",
+        capsize=5,
+    )
+
+    dynamic_plot = plt.errorbar(
+        dynamic_cost / data_length,
+        dynamic_accuracy,
+        yerr=dynamic_accuracy_err,
+        label=r"$\phi_{\text{MvM}}$",
+        fmt="x",
+        capsize=5,
+    )
+
+    plt.plot(
+        [cost_base / data_length, cost_large / data_length],
+        [accuracy_base, accuracy_large],
+        linestyle="--",
+        color="gray",
+        alpha=0.7,
+    )
+
+    plt.xlabel("Cost per Sample")
+    plt.ylabel("Accuracy")
+    plt.title(fr"$\Delta$IBC = {delta_ibc:.2f}")
+    plt.legend()
+    plt.savefig(os.path.join(run_dir, "accuracy_vs_cost_d1.pdf"), bbox_inches="tight")
 
 
 def plot_decision_distribution(run_dir, decisions, labels):
