@@ -289,6 +289,7 @@ class AIDecisionSystem:
             large_predictions = precomputed_batch["large_prediction"].astype(str).tolist()
 
         ratio = large_probs_for_base / (base_probs * self.M)
+        #ratio = torch.ones_like(ratio) * (1-0.085)
         acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)
 
         decisions = []

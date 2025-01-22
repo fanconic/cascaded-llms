@@ -347,7 +347,7 @@ class Experiment:
             "cost_large": cost_large,
             "dynamic_cost": dynamic_cost,
             "dibc_base2large": delta_ibc_base2large,
-            "dibc_base2lexpert": delta_ibc_base2lexpert,
+            "dibc_base2expert": delta_ibc_base2lexpert,
             "dibc_large2expert": delta_ibc_large2expert,
         }
 
@@ -368,27 +368,29 @@ class Experiment:
         )
 
     def _print_performance_summary(self, data: pd.DataFrame, metrics: Dict) -> None:
-        """Print a formatted table summarizing the performance of different agents."""
+        """Print a formatted table summarizing the performance of different agents,
+        plus deferral metrics for the Model-vs-Model (MvM) step.
+        """
 
-        # Calculate expert accuracy if there were any expert decisions
+        # 1. Run the outcomes analysis to retrieve counts
+        outcomes = self._analyze_decision_outcomes(data)
+
+        # 2. Existing code to compute expert accuracy, cost per sample, etc.
         expert_data = data[data["decision"] == 2]
         if len(expert_data) > 0:
-            expert_correct = (expert_data["prediction"] == expert_data["label"]).astype(
-                int
-            )
+            expert_correct = (expert_data["prediction"] == expert_data["label"]).astype(int)
             expert_accuracy = expert_correct.mean()
             expert_accuracy_err = expert_correct.std() / np.sqrt(len(expert_correct))
         else:
             expert_accuracy = float("nan")
             expert_accuracy_err = float("nan")
 
-        # Calculate costs per sample for easier comparison
         cost_per_sample_base = metrics["cost_base"] / len(data)
         cost_per_sample_large = metrics["cost_large"] / len(data)
         cost_per_sample_dynamic = metrics["dynamic_cost"] / len(data)
-        cost_per_sample_expert = self.cfg.expert_cost  # cost per expert query
+        cost_per_sample_expert = self.cfg.expert_cost
 
-        # Create formatted strings for each metric
+        # 3. Print your original performance table as before
         rows = [
             ["Model", "Accuracy", "Cost per Sample"],
             ["-----", "--------", "---------------"],
@@ -418,39 +420,33 @@ class Experiment:
             ],
         ]
 
-        # Calculate column widths
-        col_widths = [
-            max(len(str(row[i])) for row in rows) for i in range(len(rows[0]))
-        ]
+        col_widths = [max(len(str(row[i])) for row in rows) for i in range(len(rows[0]))]
 
-        # Print the table
         print("\nPerformance Summary:")
         print("===================")
-
         for row in rows:
             formatted_row = [
                 f"{str(item):<{width}}" for item, width in zip(row, col_widths)
             ]
             print("  ".join(formatted_row))
 
-        # Add Incremental Cost-Benefit
         print("\nIncremental Cost-Benefit:")
         print("====================")
-
         print(f"∆IBC(Base -> Large):\t {metrics['dibc_base2large']:.1f}")
-        print(f"∆IBC(Base -> Expert):\t {metrics['dibc_base2lexpert']:.1f}")
+        print(f"∆IBC(Base -> Expert):\t {metrics['dibc_base2expert']:.1f}")
         print(f"∆IBC(Large -> Expert):\t {metrics['dibc_large2expert']:.1f}")
 
-        # Add decision distribution information
         print("\nDecision Distribution:")
         print("====================")
         model_counts = data["decision"].value_counts().sort_index()
         total_samples = len(data)
-
         for decision, count in model_counts.items():
             model_name = ["Base Model", "Large Model", "Expert"][decision]
             percentage = (count / total_samples) * 100
             print(f"{model_name}:\t\t {count} samples ({percentage:.1f}%)")
+
+        # 4. Compute deferral metrics for the MvM step
+        self._print_mvm_deferral_metrics(outcomes)
 
     def _print_decision_matrix(self, outcomes: Dict[str, int]) -> None:
         """
@@ -578,6 +574,7 @@ class Experiment:
             "LM_Direct_Wrong": 0,  # Large model wrong (no escalation)
             "LM_Necessary_Expert": 0,  # Large model wrong & uncertainty was high
             "LM_Unnecessary_Expert": 0,  # Large model would be correct but escalated
+            "LM_corrected_wrong_pred": 0,
             # Path Analysis
             "SM_Path_Total": 0,  # Total decisions through small model path
             "LM_Path_Total": 0,  # Total decisions through large model path
@@ -616,6 +613,8 @@ class Experiment:
                     outcomes["SM_Unnecessary_Large"] += 1
                 else:
                     outcomes["SM_Necessary_Large"] += 1
+                    if is_correct:
+                        outcomes["LM_corrected_wrong_pred"] += 1
 
                 if decision == 1:  # Used Large Model
                     if is_correct:
@@ -631,3 +630,63 @@ class Experiment:
                         outcomes["LM_Necessary_Expert"] += 1
 
         return outcomes
+
+    def _print_mvm_deferral_metrics(self, outcomes: Dict[str, int]) -> None:
+        """
+        Calculate and print:
+        1) Deferral rate
+        2) Unnecessary deferral rate
+        3) Error recovery rate
+        along with binomial standard errors.
+        """
+
+        print("\nMvM Deferral Metrics:")
+        print("=====================")
+
+        # -- 1) DEFERRAL RATE
+        # fraction of times we escalated to large among base-model candidates
+        total = outcomes["SM_Path_Total"] + outcomes["LM_Path_Total"]
+        deferrals = outcomes["LM_Path_Total"]
+        if total > 0:
+            deferral_rate = deferrals / total
+            # Binomial standard error:
+            deferral_rate_err = np.sqrt(deferral_rate * (1 - deferral_rate) / total)
+        else:
+            deferral_rate = float("nan")
+            deferral_rate_err = float("nan")
+
+        print(f"Deferral Rate (Base->Large):\t {deferral_rate*100:.1f} $\pm$ {deferral_rate_err*100:.1f}")
+
+        # -- 2) UNNECESSARY DEFERRAL RATE
+        # among times base model was correct and used, fraction that got escalated
+        all_deferrals = outcomes["SM_Necessary_Large"] + outcomes["SM_Unnecessary_Large"]
+        # (We ignore SM_Unnecessary_Expert if we only care about deferrals to large.)
+        if all_deferrals > 0:
+            unnecessary_deferral_rate = outcomes["SM_Unnecessary_Large"] / all_deferrals
+            un_rate_err = np.sqrt(
+                unnecessary_deferral_rate
+                * (1 - unnecessary_deferral_rate)
+                / all_deferrals
+            )
+        else:
+            unnecessary_deferral_rate = float("nan")
+            un_rate_err = float("nan")
+
+        print(
+            f"Unnecessary Deferral Rate:\t {unnecessary_deferral_rate*100:.1f} $\pm$ {un_rate_err*100:.1f}"
+        )
+
+        # -- 3) ERROR RECOVERY RATE
+        # among times base model was wrong, fraction that got escalated
+        if all_deferrals > 0:
+            error_recovery_rate = outcomes["LM_corrected_wrong_pred"] / all_deferrals
+            er_rate_err = np.sqrt(
+                error_recovery_rate * (1 - error_recovery_rate) / all_deferrals
+            )
+        else:
+            error_recovery_rate = float("nan")
+            er_rate_err = float("nan")
+
+        print(
+            f"Error Recovery Rate:\t\t {error_recovery_rate*100:.1f} $\pm$ {er_rate_err*100:.1f}"
+        )

@@ -1,14 +1,12 @@
 seed: 42
 results_dir: results
-max_new_tokens: 512 #Keep it small to start with
-base_gen_cost: 1.0
-large_inf_cost: 0.55
+max_new_tokens: 512
+base_gen_cost: 5.0
+large_inf_cost: 0.75
 large_gen_cost: 10.0
 expert_cost: 100.0
-#base_model: HuggingFaceTB/SmolLM-1.7B-Instruct
 base_model: meta-llama/Llama-3.2-1B-Instruct
 large_model: meta-llama/Llama-3.2-3B-Instruct
-#large_model: /mnt/pdata/caf83/helm/me-llama/physionet.org/files/me-llama/1.0.0/MeLLaMA-13B-chat
 batch_size: 7
 max_input_length: 512
 online:
@@ -21,7 +19,7 @@ online:
   error_penalty: 10
 sft:
   enable: false
-  learning_rate: 1e-4
+  learning_rate: 0.0001
   buffer_size: 1
   lora_r: 32
   lora_alpha: 64
@@ -30,13 +28,11 @@ verification_fn: surrogate_token_probs
 uncertainty_fn: verdict_distribution_entropy
 precomputed:
   enable: true
-  path: /home/azureuser/caf83/helm/results/20250117/run_20250117_013018_ai2arc_challenge_models_1_8/results_ai2arc_challenge_models_1_8.csv
+  path: /home/azureuser/caf83/helm/results/20250117/run_20250117_111753_ai2arc_easy_models_3_8/results_ai2arc_easy_models_3_8.csv
 dataset:
   name: allenai/ai2_arc
-  subset: ARC-Challenge
+  subset: ARC-Easy
   split: test
   num_samples: -1
 device: cuda:0
-name_postfix: arc2challenge_1_8
-
-
+name_postfix: arc2easy_3_8_greedy
