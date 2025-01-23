@@ -9,7 +9,12 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from src.utils import plot_accuracy_vs_cost, plot_decision_distribution, plot_tau_M, plot_accuracy_vs_cost_D1
+from src.utils import (
+    plot_accuracy_vs_cost,
+    plot_decision_distribution,
+    plot_tau_M,
+    plot_accuracy_vs_cost_D1,
+)
 from src.online_sft import OnlineSFTTrainerLoRA
 from src.config import ExperimentConfig
 from src.factory import DecisionMakerFactory
@@ -35,6 +40,7 @@ class Experiment:
             max_new_tokens=cfg.max_new_tokens,
             device=cfg.device,
             precomputed=cfg.precomputed.enable,
+            uncertainty_samples=cfg.uncertainty_samples
         )
 
         cost_config = {
@@ -308,8 +314,7 @@ class Experiment:
             dynamic_accuracy,
             dynamic_accuracy_err,
         )
-        
-        
+
         plot_accuracy_vs_cost_D1(
             self.run_dir,
             cost_base,
@@ -322,7 +327,7 @@ class Experiment:
             dynamic_cost,
             dynamic_accuracy,
             dynamic_accuracy_err,
-            delta_ibc_base2large
+            delta_ibc_base2large,
         )
 
         plot_decision_distribution(
@@ -378,7 +383,9 @@ class Experiment:
         # 2. Existing code to compute expert accuracy, cost per sample, etc.
         expert_data = data[data["decision"] == 2]
         if len(expert_data) > 0:
-            expert_correct = (expert_data["prediction"] == expert_data["label"]).astype(int)
+            expert_correct = (expert_data["prediction"] == expert_data["label"]).astype(
+                int
+            )
             expert_accuracy = expert_correct.mean()
             expert_accuracy_err = expert_correct.std() / np.sqrt(len(expert_correct))
         else:
@@ -420,7 +427,9 @@ class Experiment:
             ],
         ]
 
-        col_widths = [max(len(str(row[i])) for row in rows) for i in range(len(rows[0]))]
+        col_widths = [
+            max(len(str(row[i])) for row in rows) for i in range(len(rows[0]))
+        ]
 
         print("\nPerformance Summary:")
         print("===================")
@@ -655,11 +664,15 @@ class Experiment:
             deferral_rate = float("nan")
             deferral_rate_err = float("nan")
 
-        print(f"Deferral Rate (Base->Large):\t {deferral_rate*100:.1f} $\pm$ {deferral_rate_err*100:.1f}")
+        print(
+            f"Deferral Rate (Base->Large):\t {deferral_rate*100:.1f} $\pm$ {deferral_rate_err*100:.1f}"
+        )
 
         # -- 2) UNNECESSARY DEFERRAL RATE
         # among times base model was correct and used, fraction that got escalated
-        all_deferrals = outcomes["SM_Necessary_Large"] + outcomes["SM_Unnecessary_Large"]
+        all_deferrals = (
+            outcomes["SM_Necessary_Large"] + outcomes["SM_Unnecessary_Large"]
+        )
         # (We ignore SM_Unnecessary_Expert if we only care about deferrals to large.)
         if all_deferrals > 0:
             unnecessary_deferral_rate = outcomes["SM_Unnecessary_Large"] / all_deferrals

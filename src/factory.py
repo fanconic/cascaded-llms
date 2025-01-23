@@ -28,6 +28,7 @@ class DecisionMakerFactory:
             max_new_tokens=exp_config.max_new_tokens,
             device=exp_config.device,
             precomputed=exp_config.precomputed,
+            uncertainty_samples=exp_config.uncertainty_samples,
         )
 
         cost_config_obj = CostConfig(**cost_config)

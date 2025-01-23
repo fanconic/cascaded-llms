@@ -107,7 +107,7 @@ def plot_accuracy_vs_cost(
     plt.title("Accuracy vs Cost Curve")
     plt.legend()
     plt.savefig(os.path.join(run_dir, "accuracy_vs_cost.pdf"), bbox_inches="tight")
-    
+
 
 def plot_accuracy_vs_cost_D1(
     run_dir,
@@ -121,7 +121,7 @@ def plot_accuracy_vs_cost_D1(
     dynamic_cost,
     dynamic_accuracy,
     dynamic_accuracy_err,
-    delta_ibc
+    delta_ibc,
 ):
     plt.figure(figsize=(3, 3))
 
@@ -161,7 +161,7 @@ def plot_accuracy_vs_cost_D1(
 
     plt.xlabel("Cost per Sample")
     plt.ylabel("Accuracy")
-    plt.title(fr"$\Delta$IBC = {delta_ibc:.2f}")
+    plt.title(rf"$\Delta$IBC = {delta_ibc:.2f}")
     plt.legend()
     plt.savefig(os.path.join(run_dir, "accuracy_vs_cost_d1.pdf"), bbox_inches="tight")
 

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from src.uncertainty import per_token_entropy, verdict_distribution_entropy
+from src.uncertainty import per_token_entropy, verdict_distribution_entropy, surrogate_token_uncertainties
 from src.verification import verbalisation, sequence_probability, surrogate_token_probs
 
 VERIFICATION_FN_MAPPING = {
@@ -11,6 +11,7 @@ VERIFICATION_FN_MAPPING = {
 UNCERTAINTY_FN_MAPPING = {
     "per_token_entropy": per_token_entropy,
     "verdict_distribution_entropy": verdict_distribution_entropy,
+    "surrogate_token_uncertainties":surrogate_token_uncertainties
 }
 
 
@@ -23,6 +24,7 @@ class ModelConfig:
     device: str = "cpu"
     prompt_template: str = ""
     precomputed: bool = False
+    uncertainty_samples: int = 1
 
 
 @dataclass
@@ -47,6 +49,7 @@ class ExperimentConfig:
     max_new_tokens: int
     device: str
     precomputed: bool
+    uncertainty_samples: int = 1
 
     def __post_init__(self):
         self.verification_fn = VERIFICATION_FN_MAPPING[self.verification_fn]

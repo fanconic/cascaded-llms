@@ -148,19 +148,23 @@ class AIDecisionSystem:
         base_uncertainties = self.uncertainty_fn(
             model=self.base_model,
             tokenizer=self.base_tokenizer,
-            prompts=prompts,
+            prompts=questions,
             generated_responses=base_answer,
             device=self.config.device,
             normalize_by_length=True,
+            max_length=self.config.max_input_length,
+            n=self.config.uncertainty_samples
         )
 
         large_uncertainties = self.uncertainty_fn(
             model=self.large_model,
             tokenizer=self.large_tokenizer,
-            prompts=prompts,
+            prompts=questions,
             generated_responses=large_answer,
             device=self.config.device,
             normalize_by_length=True,
+            max_length=self.config.max_input_length,
+            n=self.config.uncertainty_samples
         )
 
         return base_probs, large_probs_for_base, base_uncertainties, large_uncertainties
@@ -286,10 +290,12 @@ class AIDecisionSystem:
                 precomputed_batch["large_uncertainty"].values
             )
             base_predictions = precomputed_batch["base_prediction"].astype(str).tolist()
-            large_predictions = precomputed_batch["large_prediction"].astype(str).tolist()
+            large_predictions = (
+                precomputed_batch["large_prediction"].astype(str).tolist()
+            )
 
         ratio = large_probs_for_base / (base_probs * self.M)
-        #ratio = torch.ones_like(ratio) * (1-0.085)
+        # ratio = torch.ones_like(ratio) * (1-0.085)
         acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)
 
         decisions = []

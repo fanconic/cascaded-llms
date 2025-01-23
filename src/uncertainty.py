@@ -31,7 +31,8 @@ def per_token_entropy(
     for prompt, gen_resp in zip(prompts, generated_responses):
         if gen_resp is None:
             gen_resp = "N/A"
-        full_text = prompt + gen_resp
+        prompt = f"{prompt}\n\nAnswer: "
+        full_text = f"{prompt}\n\nAnswer: {gen_resp}"
         prompt_ids = tokenizer(prompt, add_special_tokens=False).input_ids
         gen_ids = tokenizer(gen_resp, add_special_tokens=False).input_ids
 
@@ -182,3 +183,114 @@ def verdict_distribution_entropy(
     verdict_entropy = -(verdict_probs * verdict_log_probs).sum(dim=-1)
 
     return verdict_entropy
+
+
+def patch_dropout(model, p):
+    """
+    Updates the attention dropout value for all layers in the given LLaMA model.
+
+    Args:
+        model (torch.nn.Module): The LLaMA model to update.
+        p (float): The new dropout probability. Must be in the range [0, 1).
+
+    Returns:
+        None
+    """
+    if not (0 <= p < 1):
+        raise ValueError("Dropout probability p must be in the range [0, 1).")
+
+    # Iterate over all layers in the model
+    for i, layer in enumerate(model.model.layers):
+        if hasattr(layer.self_attn, "attention_dropout"):
+            layer.self_attn.attention_dropout = p
+
+
+
+def surrogate_token_uncertainties(
+    model,
+    tokenizer,
+    prompts,
+    generated_responses,
+    n=5,  # Number of repetitions for each prompt
+    device="cuda",
+    yes_token="YES",
+    no_token="NO",
+    max_length=512,
+    normalize_by_length=None,
+):
+    """
+    Computes the distribution of p(YES) for each question, repeated n times in a batch.
+
+    Args:
+        model: The LLM to evaluate.
+        tokenizer: The tokenizer for the model.
+        prompts: A list of questions (strings).
+        generated_responses: A list of generated responses (strings).
+        n: Number of times to repeat each question in the batch.
+        device: Device to run the model on (e.g., "cuda").
+        yes_token: The token representing "YES".
+        no_token: The token representing "NO".
+        max_length: Maximum sequence length for tokenization.
+        normalize_by_length: Optional; if provided, normalize probabilities by length.
+
+    Returns:
+        torch.Tensor of shape [batch_size, n] containing p(YES) values for each repetition.
+    """
+    batch_size = len(prompts)
+
+    # Build verification prompts for each item
+    verify_prompts = []
+    for question, candidate_answer in zip(prompts, generated_responses):
+        text = (
+            "Given the following question and the model's answer, please evaluate correctness.\n"
+            f"Respond with a single token: {yes_token} or {no_token}\n\n"
+            f"Question: {question}\n\n"
+            f"Model Answer: {candidate_answer}\n\n"
+            f"Is this answer correct: {yes_token} or {no_token}?\n\n"
+            "Answer: "
+        )
+        verify_prompts.extend([text] * n)  # Repeat each question n times
+
+    # Tokenize all in a batch
+    inputs = tokenizer(
+        verify_prompts,
+        return_tensors="pt",
+        padding="max_length",
+        truncation=True,
+        max_length=max_length,
+    ).to(device)
+
+    # Find IDs for yes_token/no_token
+    yes_ids = tokenizer.encode(yes_token, add_special_tokens=False)
+    no_ids = tokenizer.encode(no_token, add_special_tokens=False)
+    yes_id = yes_ids[0] if yes_ids else None
+    no_id = no_ids[0] if no_ids else None
+    
+    patch_dropout(model, 0.1)
+
+    # Process in a single forward pass
+    with torch.no_grad():
+        model.train()
+        outputs = model(**inputs)
+    logits = outputs.logits  # [batch_size * n, seq_len, vocab_size]
+    
+    patch_dropout(model, 0.0)
+    model.eval()
+
+    # For memory efficiency, compute probabilities one batch at a time
+    seq_len = inputs["input_ids"].size(1)  # Length of each sequence
+    next_token_logits = logits[:, seq_len - 1, :]  # [batch_size * n, vocab_size]
+    next_token_probs = F.softmax(next_token_logits, dim=-1)  # [batch_size * n, vocab_size]
+
+    # Extract probabilities for YES and NO tokens
+    p_yes = next_token_probs[:, yes_id] if yes_id is not None else torch.zeros(next_token_probs.size(0), device=device)
+    p_no = next_token_probs[:, no_id] if no_id is not None else torch.zeros(next_token_probs.size(0), device=device)
+
+    # Normalize probabilities
+    denom = p_yes + p_no
+    p_yes_normalized = torch.where(denom > 0, p_yes / denom, torch.full_like(p_yes, 0.5))  # Handle edge cases
+
+    # Reshape to [batch_size, n]
+    p_yes_distribution = p_yes_normalized.view(batch_size, n)
+    entropy = -(p_yes_distribution * torch.log(p_yes_distribution + 1e-9)).sum(dim=1)
+    return entropy
