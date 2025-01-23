@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Dict
 from src.uncertainty import per_token_entropy, verdict_distribution_entropy, surrogate_token_uncertainties
 from src.verification import verbalisation, sequence_probability, surrogate_token_probs
 
@@ -19,11 +20,11 @@ UNCERTAINTY_FN_MAPPING = {
 class ModelConfig:
     """Configuration for model initialization and generation."""
 
+    precomputed: Dict
     max_input_length: int = 512
     max_new_tokens: int = 256
     device: str = "cpu"
     prompt_template: str = ""
-    precomputed: bool = False
     uncertainty_samples: int = 1
 
 
@@ -48,7 +49,7 @@ class ExperimentConfig:
     max_input_length: int
     max_new_tokens: int
     device: str
-    precomputed: bool
+    precomputed: Dict
     uncertainty_samples: int = 1
 
     def __post_init__(self):

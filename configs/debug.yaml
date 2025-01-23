@@ -26,9 +26,13 @@ sft:
   lora_dropout: 0.1
 verification_fn: surrogate_token_probs
 uncertainty_fn: surrogate_token_uncertainties
+uncertainty_samples: 5
 precomputed:
-  enable: false
-  path: ""
+  enable: true
+  generation: true
+  verification: true
+  uncertainty: false
+  path: "/home/azureuser/caf83/helm/results/run_20250123_000458_debug/results_debug.csv"
 dataset:
   name: allenai/ai2_arc
   subset: ARC-Easy
@@ -36,4 +40,3 @@ dataset:
   num_samples: 21
 device: cuda:1
 name_postfix: debug
-uncertainty_samples: 5

@@ -39,7 +39,7 @@ class Experiment:
             max_input_length=cfg.max_input_length,
             max_new_tokens=cfg.max_new_tokens,
             device=cfg.device,
-            precomputed=cfg.precomputed.enable,
+            precomputed=cfg.precomputed,
             uncertainty_samples=cfg.uncertainty_samples
         )
 
@@ -150,7 +150,6 @@ class Experiment:
                 batch["prompts"],
                 batch["answer"],
                 batch["questions"],
-                precomputed=self.cfg.precomputed.enable,
                 precomputed_batch=precomputed_batch,
             )
 

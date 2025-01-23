@@ -65,7 +65,7 @@ class AIDecisionSystem:
         self.uncertainty_fn = uncertainty_fn
 
         # Initialize models
-        if not self.config.precomputed:
+        if not (self.config.precomputed.generation and self.config.precomputed.verification and self.config.precomputed.uncertainty):
             self.base_model, self.base_tokenizer = self._initialize_model(
                 base_model_path, "Small"
             )
@@ -121,52 +121,65 @@ class AIDecisionSystem:
         questions: List[str],
         base_answer: List[str],
         large_answer: List[str],
+        precomputed_batch=None
     ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         """Evaluate model outputs and compute probabilities and uncertainties."""
-        base_probs = self.verification_fn(
-            model=self.base_model,
-            tokenizer=self.base_tokenizer,
-            prompts=prompts,
-            questions=questions,
-            generated_responses=base_answer,
-            device=self.config.device,
-            normalize_by_length=True,
-            prompt_template=self.config.prompt_template,
-        )
+        
+        if not self.config.precomputed.verification:
+            base_probs = self.verification_fn(
+                model=self.base_model,
+                tokenizer=self.base_tokenizer,
+                prompts=prompts,
+                questions=questions,
+                generated_responses=base_answer,
+                device=self.config.device,
+                normalize_by_length=True,
+                prompt_template=self.config.prompt_template,
+            )
 
-        large_probs_for_base = self.verification_fn(
-            model=self.large_model,
-            tokenizer=self.large_tokenizer,
-            prompts=prompts,
-            questions=questions,
-            generated_responses=base_answer,
-            device=self.config.device,
-            normalize_by_length=True,
-            prompt_template=self.config.prompt_template,
-        )
+            large_probs_for_base = self.verification_fn(
+                model=self.large_model,
+                tokenizer=self.large_tokenizer,
+                prompts=prompts,
+                questions=questions,
+                generated_responses=base_answer,
+                device=self.config.device,
+                normalize_by_length=True,
+                prompt_template=self.config.prompt_template,
+            )
+        else:
+            base_probs = torch.Tensor(precomputed_batch["base_prob"].values)
+            large_probs_for_base = torch.Tensor(precomputed_batch["large_prob"].values)
 
-        base_uncertainties = self.uncertainty_fn(
-            model=self.base_model,
-            tokenizer=self.base_tokenizer,
-            prompts=questions,
-            generated_responses=base_answer,
-            device=self.config.device,
-            normalize_by_length=True,
-            max_length=self.config.max_input_length,
-            n=self.config.uncertainty_samples
-        )
+        if not self.config.precomputed.uncertainty:
+            base_uncertainties = self.uncertainty_fn(
+                model=self.base_model,
+                tokenizer=self.base_tokenizer,
+                prompts=questions,
+                generated_responses=base_answer,
+                device=self.config.device,
+                normalize_by_length=True,
+                max_length=self.config.max_input_length,
+                n=self.config.uncertainty_samples
+            )
 
-        large_uncertainties = self.uncertainty_fn(
-            model=self.large_model,
-            tokenizer=self.large_tokenizer,
-            prompts=questions,
-            generated_responses=large_answer,
-            device=self.config.device,
-            normalize_by_length=True,
-            max_length=self.config.max_input_length,
-            n=self.config.uncertainty_samples
-        )
-
+            large_uncertainties = self.uncertainty_fn(
+                model=self.large_model,
+                tokenizer=self.large_tokenizer,
+                prompts=questions,
+                generated_responses=large_answer,
+                device=self.config.device,
+                normalize_by_length=True,
+                max_length=self.config.max_input_length,
+                n=self.config.uncertainty_samples
+            )
+        else:
+            base_uncertainties = torch.Tensor(
+                precomputed_batch["base_uncertainty"].values
+            )
+            large_uncertainties = torch.Tensor(
+                precomputed_batch["large_uncertainty"].values
+            )
         return base_probs, large_probs_for_base, base_uncertainties, large_uncertainties
 
     def _make_decision(
@@ -249,12 +262,11 @@ class AIDecisionSystem:
         prompts: List[str],
         expert_responses: List[List[str]],
         questions: List[str],
-        precomputed=False,
         precomputed_batch=None,
     ) -> Tuple[List[Dict[str, Any]], List[str], List[str]]:
         """Process a batch of prompts and make decisions with optional online learning."""
 
-        if not precomputed and precomputed_batch is None:
+        if not self.config.precomputed.generation:
             base_outputs = self.generate_response(
                 self.base_model, self.base_tokenizer, prompts
             )
@@ -268,31 +280,23 @@ class AIDecisionSystem:
             large_predictions = [
                 extract_predictions(large_output) for large_output in large_outputs
             ]
-
-            (
-                base_probs,
-                large_probs_for_base,
-                base_uncertainties,
-                large_uncertainties,
-            ) = self._evaluate_models(
-                prompts, questions, base_predictions, large_predictions
-            )
-
+        
         else:
             base_outputs = precomputed_batch["base_response"].astype(str).tolist()
             large_outputs = precomputed_batch["large_response"].astype(str).tolist()
-            base_probs = torch.Tensor(precomputed_batch["base_prob"].values)
-            large_probs_for_base = torch.Tensor(precomputed_batch["large_prob"].values)
-            base_uncertainties = torch.Tensor(
-                precomputed_batch["base_uncertainty"].values
-            )
-            large_uncertainties = torch.Tensor(
-                precomputed_batch["large_uncertainty"].values
-            )
             base_predictions = precomputed_batch["base_prediction"].astype(str).tolist()
             large_predictions = (
                 precomputed_batch["large_prediction"].astype(str).tolist()
             )
+            
+        (
+            base_probs,
+            large_probs_for_base,
+            base_uncertainties,
+            large_uncertainties,
+        ) = self._evaluate_models(
+            prompts, questions, base_predictions, large_predictions, precomputed_batch
+        )
 
         ratio = large_probs_for_base / (base_probs * self.M)
         # ratio = torch.ones_like(ratio) * (1-0.085)
