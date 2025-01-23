@@ -1,5 +1,5 @@
 seed: 42
-results_dir: results/arc2challenge
+results_dir: results/arc2easy
 max_new_tokens: 512 #Keep it small to start with
 base_gen_cost: 5.0
 large_inf_cost: 0.75
@@ -26,7 +26,8 @@ sft:
   lora_r: 32
   lora_alpha: 64
   lora_dropout: 0.1
-verification_fn: surrogate_token_probsuncertainty_fn: surrogate_token_uncertainties
+verification_fn: surrogate_token_probs
+uncertainty_fn: surrogate_token_uncertainties
 uncertainty_samples: 5
 precomputed:
   enable: true
