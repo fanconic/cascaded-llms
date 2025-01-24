@@ -40,18 +40,11 @@ class Experiment:
             max_new_tokens=cfg.max_new_tokens,
             device=cfg.device,
             precomputed=cfg.precomputed,
-            uncertainty_samples=cfg.uncertainty_samples
+            uncertainty_samples=cfg.uncertainty_samples,
         )
 
-        cost_config = {
-            "base_gen_cost": cfg.base_gen_cost,
-            "large_gen_cost": cfg.large_gen_cost,
-            "large_inf_cost": cfg.large_inf_cost,
-            "expert_cost": cfg.expert_cost,
-        }
-
         self.decision_system = DecisionMakerFactory.create_decision_maker(
-            exp_config, cfg.online, cost_config
+            exp_config, cfg.online, cfg.costs
         )
 
         self.sft_trainers = self._initialize_sft() if cfg.sft.enable else None
@@ -125,6 +118,11 @@ class Experiment:
             "tau_large": [],
             # Costs
             "costs": [],
+            # System risks
+            "system_risk": [],
+            "system_risk_base": [],
+            "system_risk_large": [],
+            "system_risk_expert": [],
         }
 
         precomputed_batch = None
@@ -210,6 +208,12 @@ class Experiment:
         # Costs
         collectors["costs"].append(decision["cost"])
 
+        # System Risk
+        collectors["system_risk"].append(decision["system_risk"])
+        collectors["system_risk_base"].append(decision["system_risk_base"])
+        collectors["system_risk_large"].append(decision["system_risk_large"])
+        collectors["system_risk_expert"].append(decision["system_risk_expert"])
+
     def _create_dataframe_dict(self, collectors: Dict) -> Dict:
         """Create dictionary for DataFrame creation from collectors."""
         return {
@@ -233,6 +237,10 @@ class Experiment:
             "tau_base": collectors["tau_base"],
             "tau_large": collectors["tau_large"],
             "cost": collectors["costs"],
+            "system_risk": collectors["system_risk"],
+            "system_risk_base": collectors["system_risk_base"],
+            "system_risk_large": collectors["system_risk_large"],
+            "system_risk_expert": collectors["system_risk_expert"],
         }
 
     def _analyze_and_save_results(self, results: Dict):
@@ -247,12 +255,11 @@ class Experiment:
         """Calculate accuracy metrics and generate plots."""
         # Calculate base and large model accuracies
         small_model_correct = [
-            label == extract_predictions(pred)
-            for label, pred in zip(data["label"], data["base_response"])
+            label == pred for label, pred in zip(data["label"], data["base_prediction"])
         ]
         large_model_correct = [
-            label == extract_predictions(pred)
-            for label, pred in zip(data["label"], data["large_response"])
+            label == pred
+            for label, pred in zip(data["label"], data["large_prediction"])
         ]
 
         # Calculate accuracies and errors
@@ -266,8 +273,8 @@ class Experiment:
         )
 
         # Calculate costs
-        cost_base = self.dataset_length * self.cfg.base_gen_cost
-        cost_large = self.dataset_length * self.cfg.large_gen_cost
+        cost_base = self.dataset_length * self.cfg.costs.base_gen_cost
+        cost_large = self.dataset_length * self.cfg.costs.large_gen_cost
 
         # Calculate dynamic system metrics
         data["correct"] = (data["prediction"] == data["label"]).astype(int)
@@ -282,14 +289,14 @@ class Experiment:
         delta_ibc_base2large = (ibc_base2model - ibc_base2large) / ibc_base2large * 100
 
         ibc_base2lexpert = (1.0 - accuracy_base) / (
-            self.cfg.expert_cost * len(data) - cost_base
+            self.cfg.costs.expert_cost * len(data) - cost_base
         )
         delta_ibc_base2lexpert = (
             (ibc_base2model - ibc_base2lexpert) / ibc_base2lexpert * 100
         )
 
         ibc_large2expert = (1.0 - accuracy_large) / (
-            self.cfg.expert_cost * len(data) - cost_large
+            self.cfg.costs.expert_cost * len(data) - cost_large
         )
         ibc_large2model = (dynamic_accuracy - accuracy_large) / (
             dynamic_cost - cost_large
@@ -297,6 +304,12 @@ class Experiment:
         delta_ibc_large2expert = (
             (ibc_large2model - ibc_large2expert) / ibc_large2expert * 100
         )
+
+        # System risk:
+        system_risk = data["system_risk"].mean()
+        system_risk_base = data["system_risk_base"].mean()
+        system_risk_large = data["system_risk_large"].mean()
+        system_risk_expert = data["system_risk_expert"].mean()
 
         # Generate plots
         plot_accuracy_vs_cost(
@@ -307,7 +320,7 @@ class Experiment:
             cost_large,
             accuracy_large,
             accuracy_large_err,
-            self.cfg.expert_cost,
+            self.cfg.costs.expert_cost,
             len(data),
             dynamic_cost,
             dynamic_accuracy,
@@ -353,6 +366,10 @@ class Experiment:
             "dibc_base2large": delta_ibc_base2large,
             "dibc_base2expert": delta_ibc_base2lexpert,
             "dibc_large2expert": delta_ibc_large2expert,
+            "system_risk": system_risk,
+            "system_risk_base": system_risk_base,
+            "system_risk_large": system_risk_large,
+            "system_risk_expert": system_risk_expert,
         }
 
         # Save metrics to file
@@ -394,21 +411,28 @@ class Experiment:
         cost_per_sample_base = metrics["cost_base"] / len(data)
         cost_per_sample_large = metrics["cost_large"] / len(data)
         cost_per_sample_dynamic = metrics["dynamic_cost"] / len(data)
-        cost_per_sample_expert = self.cfg.expert_cost
+        cost_per_sample_expert = self.cfg.costs.expert_cost
+
+        system_risk = metrics["system_risk"]
+        system_risk_base = metrics["system_risk_base"]
+        system_risk_large = metrics["system_risk_large"]
+        system_risk_expert = metrics["system_risk_expert"]
 
         # 3. Print your original performance table as before
         rows = [
-            ["Model", "Accuracy", "Cost per Sample"],
-            ["-----", "--------", "---------------"],
+            ["Model", "Accuracy", "Cost per Sample", "System Risk"],
+            ["-----", "--------", "---------------", "-----------"],
             [
                 "Base Model",
                 f"{metrics['accuracy_base']:.3f} ± {metrics['accuracy_base_err']:.3f}",
                 f"{cost_per_sample_base:.2f}",
+                f"{system_risk_base:.2f}",
             ],
             [
                 "Large Model",
                 f"{metrics['accuracy_large']:.3f} ± {metrics['accuracy_large_err']:.3f}",
                 f"{cost_per_sample_large:.2f}",
+                f"{system_risk_large:.2f}",
             ],
             [
                 "Expert",
@@ -418,11 +442,13 @@ class Experiment:
                     else "N/A"
                 ),
                 f"{cost_per_sample_expert:.2f}",
+                f"{system_risk_expert:.2f}",
             ],
             [
                 "Dynamic System",
                 f"{metrics['dynamic_accuracy']:.3f} ± {metrics['dynamic_accuracy_err']:.3f}",
                 f"{cost_per_sample_dynamic:.2f}",
+                f"{system_risk:.2f}",
             ],
         ]
 

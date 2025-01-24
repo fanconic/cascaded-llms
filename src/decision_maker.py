@@ -65,7 +65,11 @@ class AIDecisionSystem:
         self.uncertainty_fn = uncertainty_fn
 
         # Initialize models
-        if not (self.config.precomputed.generation and self.config.precomputed.verification and self.config.precomputed.uncertainty):
+        if not (
+            self.config.precomputed.generation
+            and self.config.precomputed.verification
+            and self.config.precomputed.uncertainty
+        ):
             self.base_model, self.base_tokenizer = self._initialize_model(
                 base_model_path, "Small"
             )
@@ -121,10 +125,10 @@ class AIDecisionSystem:
         questions: List[str],
         base_answer: List[str],
         large_answer: List[str],
-        precomputed_batch=None
+        precomputed_batch=None,
     ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         """Evaluate model outputs and compute probabilities and uncertainties."""
-        
+
         if not self.config.precomputed.verification:
             base_probs = self.verification_fn(
                 model=self.base_model,
@@ -160,7 +164,7 @@ class AIDecisionSystem:
                 device=self.config.device,
                 normalize_by_length=True,
                 max_length=self.config.max_input_length,
-                n=self.config.uncertainty_samples
+                n=self.config.uncertainty_samples,
             )
 
             large_uncertainties = self.uncertainty_fn(
@@ -171,7 +175,7 @@ class AIDecisionSystem:
                 device=self.config.device,
                 normalize_by_length=True,
                 max_length=self.config.max_input_length,
-                n=self.config.uncertainty_samples
+                n=self.config.uncertainty_samples,
             )
         else:
             base_uncertainties = torch.Tensor(
@@ -280,7 +284,7 @@ class AIDecisionSystem:
             large_predictions = [
                 extract_predictions(large_output) for large_output in large_outputs
             ]
-        
+
         else:
             base_outputs = precomputed_batch["base_response"].astype(str).tolist()
             large_outputs = precomputed_batch["large_response"].astype(str).tolist()
@@ -288,7 +292,7 @@ class AIDecisionSystem:
             large_predictions = (
                 precomputed_batch["large_prediction"].astype(str).tolist()
             )
-            
+
         (
             base_probs,
             large_probs_for_base,
@@ -299,7 +303,6 @@ class AIDecisionSystem:
         )
 
         ratio = large_probs_for_base / (base_probs * self.M)
-        # ratio = torch.ones_like(ratio) * (1-0.085)
         acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)
 
         decisions = []
@@ -321,6 +324,63 @@ class AIDecisionSystem:
             if self.online_enable:
                 is_correct = final_answer.strip() == expert_responses[i].strip()
                 self._update_parameters(decision, is_correct)
+
+            # Calculate the system risk in this step
+            # MvM
+            phi_mvm_0 = acceptance_prob[i]
+            phi_mvm_1 = 1 - acceptance_prob[i]
+
+            # MvH
+            phi_mvh_0_base = base_uncertainties[i] < self.tau_base
+            phi_mvh_2_base = base_uncertainties[i] >= self.tau_base
+            phi_mvh_0_large = large_uncertainties[i] < self.tau_large
+            phi_mvh_2_large = large_uncertainties[i] >= self.tau_large
+
+            # 01 loss
+            l_y_base = self.costs.mistake_cost * (
+                base_predictions[i] != expert_responses[i]
+            )
+            l_y_large = self.costs.mistake_cost * (
+                large_predictions[i] != expert_responses[i]
+            )
+
+            # Cumulative sums per distinct action
+            c_0 = self.costs.base_gen_cost + self.costs.large_inf_cost
+            c_1 = (
+                self.costs.base_gen_cost
+                + self.costs.large_inf_cost
+                + self.costs.large_gen_cost
+            )
+            c_2 = (
+                self.costs.base_gen_cost
+                + self.costs.large_inf_cost
+                + self.costs.expert_cost
+            )
+            c_3 = (
+                self.costs.base_gen_cost
+                + self.costs.large_inf_cost
+                + self.costs.large_gen_cost
+                + self.costs.expert_cost
+            )
+
+            # Condensed policies
+            Phi_0 = phi_mvm_0 * phi_mvh_0_base
+            Phi_1 = phi_mvm_1 * phi_mvh_0_large
+            Phi_2 = phi_mvm_0 * phi_mvh_2_base
+            Phi_3 = phi_mvm_1 * phi_mvh_2_large
+
+            loss_part = Phi_0 * l_y_base + Phi_1 * l_y_large
+            cost_part = Phi_0 * c_0 + Phi_1 * c_1 + Phi_2 * c_2 + Phi_3 * c_3
+            system_risk = loss_part + cost_part
+
+            # Other system risk strategies
+            system_risk_base = (
+                self.costs.mistake_cost * l_y_base + self.costs.base_gen_cost
+            )
+            system_risk_large = (
+                self.costs.mistake_cost * l_y_large + self.costs.large_gen_cost
+            )
+            system_risk_expert = self.costs.expert_cost
 
             decisions.append(
                 {
@@ -344,6 +404,10 @@ class AIDecisionSystem:
                     "tau_large": self.tau_large,
                     "M": self.M,
                     "u": u,
+                    "system_risk": system_risk,
+                    "system_risk_base": system_risk_base,
+                    "system_risk_large": system_risk_large,
+                    "system_risk_expert": system_risk_expert,
                 }
             )
 

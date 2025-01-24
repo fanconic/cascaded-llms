@@ -205,7 +205,6 @@ def patch_dropout(model, p):
             layer.self_attn.attention_dropout = p
 
 
-
 def surrogate_token_uncertainties(
     model,
     tokenizer,
@@ -265,7 +264,7 @@ def surrogate_token_uncertainties(
     no_ids = tokenizer.encode(no_token, add_special_tokens=False)
     yes_id = yes_ids[0] if yes_ids else None
     no_id = no_ids[0] if no_ids else None
-    
+
     patch_dropout(model, 0.1)
 
     # Process in a single forward pass
@@ -273,24 +272,37 @@ def surrogate_token_uncertainties(
         model.train()
         outputs = model(**inputs)
     logits = outputs.logits  # [batch_size * n, seq_len, vocab_size]
-    
+
     patch_dropout(model, 0.0)
     model.eval()
 
     # For memory efficiency, compute probabilities one batch at a time
     seq_len = inputs["input_ids"].size(1)  # Length of each sequence
     next_token_logits = logits[:, seq_len - 1, :]  # [batch_size * n, vocab_size]
-    next_token_probs = F.softmax(next_token_logits, dim=-1)  # [batch_size * n, vocab_size]
+    next_token_probs = F.softmax(
+        next_token_logits, dim=-1
+    )  # [batch_size * n, vocab_size]
 
     # Extract probabilities for YES and NO tokens
-    p_yes = next_token_probs[:, yes_id] if yes_id is not None else torch.zeros(next_token_probs.size(0), device=device)
-    p_no = next_token_probs[:, no_id] if no_id is not None else torch.zeros(next_token_probs.size(0), device=device)
+    p_yes = (
+        next_token_probs[:, yes_id]
+        if yes_id is not None
+        else torch.zeros(next_token_probs.size(0), device=device)
+    )
+    p_no = (
+        next_token_probs[:, no_id]
+        if no_id is not None
+        else torch.zeros(next_token_probs.size(0), device=device)
+    )
 
     # Normalize probabilities
     denom = p_yes + p_no
-    p_yes_normalized = torch.where(denom > 0, p_yes / denom, torch.full_like(p_yes, 0.5))  # Handle edge cases
+    p_yes_normalized = torch.where(
+        denom > 0, p_yes / denom, torch.full_like(p_yes, 0.5)
+    )  # Handle edge cases
 
     # Reshape to [batch_size, n]
     p_yes_distribution = p_yes_normalized.view(batch_size, n)
-    entropy = -(p_yes_distribution * torch.log(p_yes_distribution + 1e-9)).sum(dim=1)
+    p_yes_distribution = p_yes_distribution.mean(dim=1)
+    entropy = -(p_yes_distribution * torch.log(p_yes_distribution + 1e-9))
     return entropy

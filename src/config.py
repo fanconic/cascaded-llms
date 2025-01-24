@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 from typing import Dict
-from src.uncertainty import per_token_entropy, verdict_distribution_entropy, surrogate_token_uncertainties
+from src.uncertainty import (
+    per_token_entropy,
+    verdict_distribution_entropy,
+    surrogate_token_uncertainties,
+)
 from src.verification import verbalisation, sequence_probability, surrogate_token_probs
 
 VERIFICATION_FN_MAPPING = {
@@ -12,7 +16,7 @@ VERIFICATION_FN_MAPPING = {
 UNCERTAINTY_FN_MAPPING = {
     "per_token_entropy": per_token_entropy,
     "verdict_distribution_entropy": verdict_distribution_entropy,
-    "surrogate_token_uncertainties":surrogate_token_uncertainties
+    "surrogate_token_uncertainties": surrogate_token_uncertainties,
 }
 
 
@@ -36,6 +40,7 @@ class CostConfig:
     large_gen_cost: float
     large_inf_cost: float
     expert_cost: float
+    mistake_cost: float
 
 
 @dataclass

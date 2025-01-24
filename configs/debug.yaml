@@ -1,12 +1,14 @@
 seed: 42
 results_dir: results
 max_new_tokens: 512
-base_gen_cost: 1.0
-large_inf_cost: 0.3
-large_gen_cost: 5.0
-expert_cost: 100.0
-base_model: meta-llama/Llama-3.2-3B-Instruct
-large_model: meta-llama/Llama-3.1-8B-Instruct
+costs:
+  base_gen_cost: 1.0
+  large_inf_cost: 0.3
+  large_gen_cost: 5.0
+  expert_cost: 100.0
+  mistake_cost: 1.0
+base_model: meta-llama/Llama-3.2-1B-Instruct
+large_model: meta-llama/Llama-3.1-3B-Instruct
 batch_size: 7
 max_input_length: 512
 online:
@@ -31,12 +33,12 @@ precomputed:
   enable: true
   generation: true
   verification: true
-  uncertainty: false
-  path: "/home/azureuser/caf83/helm/results/run_20250123_000458_debug/results_debug.csv"
+  uncertainty: true
+  path: "/home/azureuser/caf83/helm/results/20250123/arc2easy/run_20250123_111340_ai2arc_easy_models_1_3/results_ai2arc_easy_models_1_3.csv"
 dataset:
   name: allenai/ai2_arc
   subset: ARC-Easy
   split: test
-  num_samples: 21
-device: cuda:1
+  num_samples: -1
+device: cuda:0
 name_postfix: debug

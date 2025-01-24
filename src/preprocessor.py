@@ -80,7 +80,7 @@ class MedMCQAPreprocessor(DatasetPreprocessor):
 
     @staticmethod
     def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
-        prompt_template = """You are a medical doctor answering realworld medical entrance exam questions.
+        prompt_template = """You are a medical doctor answering real world medical entrance exam questions.
 Answer the following multiple-choice question using step-by-step reasoning, then conclude with a final line stating the best answer.
 
 Question: {question}
