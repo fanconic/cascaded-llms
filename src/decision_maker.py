@@ -18,6 +18,7 @@ from transformers import (
 )
 from src.config import ModelConfig, CostConfig, OnlineConfig
 from src.utils import extract_predictions
+from scipy.optimize import minimize
 
 
 class AIDecisionSystem:
@@ -237,29 +238,123 @@ class AIDecisionSystem:
                 u,
             )
 
-    def _update_parameters(self, decision: int, is_correct: bool) -> None:
-        """Update M and tau parameters based on decision outcome."""
-        dM = 0.0
-        dTau_base = 0.0
-        dTau_large = 0.0
+    def optimize_parameters(
+        self,
+        decisions: Dict,
+        bounds: Optional[List[Tuple[float, float]]] = None,
+        initial_guess: Optional[List[float]] = None,
+    ):
+        """
+        Optimize the parameters M, tau_base, and tau_large to minimize system risk.
 
-        if decision == 0:  # used small model
-            if is_correct:
-                dM -= 1.0
-            else:
-                dM += 1.0
-        elif decision == 1:  # used large model
-            if is_correct:
-                dM += 1.0
-        #     else:
-        #         dTau_large -= 1.0
-        # elif decision == 2:  # expert
-        #     dTau_base -= 0.1
-        #     dTau_large -= 0.1
+        Args:
+            prompts: List of prompts for the models.
+            expert_responses: List of expert responses.
+            questions: List of questions.
+            precomputed_batch: Optional precomputed batch of data.
+            bounds: Optional bounds for M, tau_base, and tau_large.
+            initial_guess: Optional initial values for M, tau_base, and tau_large.
 
-        self.M = max(1e-3, self.M + self.lr_M * dM)
-        self.tau_base = max(0.0, self.tau_base + self.lr_tau * dTau_base)
-        self.tau_large = max(0.0, self.tau_large + self.lr_tau * dTau_large)
+        Returns:
+            result: Optimization result from scipy.optimize.minimize.
+        """
+
+        # Define bounds if not provided
+        if bounds is None:
+            bounds = [(0.5, 4.0), (0.01, 1.0), (0.01, 1.0)]  # Default bounds
+
+        # Define initial guess if not provided
+        if initial_guess is None:
+            initial_guess = [self.M, self.tau_base, self.tau_large]
+
+        # Objective function to minimize
+        def objective(params):
+            M, tau_base, tau_large = params
+            total_system_risk = 0
+            for decision in decisions:
+                system_risk = self._calculate_system_risk(
+                    M, tau_base, tau_large, 
+                    large_probs_for_base=decision["large_probs"],
+                    base_probs=decision["base_probs"],
+                    base_uncertainties=decision["base_uncertainty"],
+                    large_uncertainties=decision["large_uncertainty"],
+                    base_predictions=decision["base_prediction"],
+                    large_predictions=decision["large_prediction"],
+                    expert_responses=decision["label"],
+                )
+                total_system_risk += system_risk
+            return total_system_risk
+
+        # Perform optimization
+        result = minimize(
+            fun=objective,
+            x0=initial_guess,
+            bounds=bounds,
+            method="L-BFGS-B",
+        )
+
+        # Update the parameters to the optimized values
+        self.M, self.tau_base, self.tau_large = result.x
+
+    def _calculate_system_risk(
+        self,
+        M, tau_base, tau_large,
+        large_probs_for_base,
+        base_probs,
+        base_uncertainties,
+        large_uncertainties,
+        base_predictions,
+        large_predictions,
+        expert_responses,
+    ):
+        # Calculate the system risk in this step
+        # MvM
+        ratio = torch.Tensor([large_probs_for_base / (base_probs * M)])
+        acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)
+
+        phi_mvm_0 = acceptance_prob
+        phi_mvm_1 = 1 - acceptance_prob
+
+        # MvH
+        phi_mvh_0_base = base_uncertainties < tau_base
+        phi_mvh_2_base = base_uncertainties >= tau_base
+        phi_mvh_0_large = large_uncertainties < tau_large
+        phi_mvh_2_large = large_uncertainties >= tau_large
+
+        # 01 loss
+        l_y_base = self.costs.mistake_cost * (base_predictions != expert_responses)
+        l_y_large = self.costs.mistake_cost * (large_predictions != expert_responses)
+
+        # Cumulative sums per distinct action
+        c_0 = self.costs.base_gen_cost + self.costs.large_inf_cost
+        c_1 = (
+            self.costs.base_gen_cost
+            + self.costs.large_inf_cost
+            + self.costs.large_gen_cost
+        )
+        c_2 = (
+            self.costs.base_gen_cost
+            + self.costs.large_inf_cost
+            + self.costs.expert_cost
+        )
+        c_3 = (
+            self.costs.base_gen_cost
+            + self.costs.large_inf_cost
+            + self.costs.large_gen_cost
+            + self.costs.expert_cost
+        )
+
+        # Condensed policies
+        Phi_0 = phi_mvm_0 * phi_mvh_0_base
+        Phi_1 = phi_mvm_1 * phi_mvh_0_large
+        Phi_2 = phi_mvm_0 * phi_mvh_2_base
+        Phi_3 = phi_mvm_1 * phi_mvh_2_large
+
+        loss_part = Phi_0 * l_y_base + Phi_1 * l_y_large
+        cost_part = Phi_0 * c_0 + Phi_1 * c_1 + Phi_2 * c_2 + Phi_3 * c_3
+        system_risk = loss_part + cost_part
+
+        return system_risk
 
     def decide_batch(
         self,
@@ -320,21 +415,16 @@ class AIDecisionSystem:
                 expert_responses[i],
             )
 
-            is_correct = None
-            if self.online_enable:
-                is_correct = final_answer.strip() == expert_responses[i].strip()
-                self._update_parameters(decision, is_correct)
-
-            # Calculate the system risk in this step
-            # MvM
-            phi_mvm_0 = acceptance_prob[i]
-            phi_mvm_1 = 1 - acceptance_prob[i]
-
-            # MvH
-            phi_mvh_0_base = base_uncertainties[i] < self.tau_base
-            phi_mvh_2_base = base_uncertainties[i] >= self.tau_base
-            phi_mvh_0_large = large_uncertainties[i] < self.tau_large
-            phi_mvh_2_large = large_uncertainties[i] >= self.tau_large
+            system_risk = self._calculate_system_risk(
+                self.M, self.tau_base, self.tau_large,
+                large_probs_for_base[i],
+                base_probs[i],
+                base_uncertainties[i],
+                large_uncertainties[i],
+                base_predictions[i],
+                large_predictions[i],
+                expert_responses[i],
+            )
 
             # 01 loss
             l_y_base = self.costs.mistake_cost * (
@@ -344,41 +434,12 @@ class AIDecisionSystem:
                 large_predictions[i] != expert_responses[i]
             )
 
-            # Cumulative sums per distinct action
-            c_0 = self.costs.base_gen_cost + self.costs.large_inf_cost
-            c_1 = (
-                self.costs.base_gen_cost
-                + self.costs.large_inf_cost
-                + self.costs.large_gen_cost
-            )
-            c_2 = (
-                self.costs.base_gen_cost
-                + self.costs.large_inf_cost
-                + self.costs.expert_cost
-            )
-            c_3 = (
-                self.costs.base_gen_cost
-                + self.costs.large_inf_cost
-                + self.costs.large_gen_cost
-                + self.costs.expert_cost
-            )
-
-            # Condensed policies
-            Phi_0 = phi_mvm_0 * phi_mvh_0_base
-            Phi_1 = phi_mvm_1 * phi_mvh_0_large
-            Phi_2 = phi_mvm_0 * phi_mvh_2_base
-            Phi_3 = phi_mvm_1 * phi_mvh_2_large
-
-            loss_part = Phi_0 * l_y_base + Phi_1 * l_y_large
-            cost_part = Phi_0 * c_0 + Phi_1 * c_1 + Phi_2 * c_2 + Phi_3 * c_3
-            system_risk = loss_part + cost_part
-
             # Other system risk strategies
             system_risk_base = (
-                self.costs.mistake_cost * l_y_base + self.costs.base_gen_cost
+                l_y_base + self.costs.base_gen_cost
             )
             system_risk_large = (
-                self.costs.mistake_cost * l_y_large + self.costs.large_gen_cost
+                l_y_large + self.costs.large_gen_cost
             )
             system_risk_expert = self.costs.expert_cost
 
@@ -389,7 +450,6 @@ class AIDecisionSystem:
                     "response": final_answer,
                     "prediction": extract_predictions(final_answer),
                     "cost": cost,
-                    "is_correct": is_correct,
                     "base_response": base_response,
                     "large_response": large_response,
                     "base_prediction": base_predictions[i],
@@ -408,6 +468,7 @@ class AIDecisionSystem:
                     "system_risk_base": system_risk_base,
                     "system_risk_large": system_risk_large,
                     "system_risk_expert": system_risk_expert,
+                    "label": expert_responses[i],
                 }
             )
 

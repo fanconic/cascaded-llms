@@ -6,15 +6,15 @@ costs:
   large_inf_cost: 0.3
   large_gen_cost: 5.0
   expert_cost: 100.0
-  mistake_cost: 1.0
+  mistake_cost: 250.0
 base_model: meta-llama/Llama-3.2-1B-Instruct
 large_model: meta-llama/Llama-3.1-3B-Instruct
 batch_size: 7
 max_input_length: 512
 online:
   enable: false
-  initial_uncertainty_threshold_base: 300
-  initial_uncertainty_threshold_large: 300
+  initial_uncertainty_threshold_base: 100
+  initial_uncertainty_threshold_large: 100
   initial_M: 1
   lr_tau: 0.1
   lr_M: 0.005

@@ -179,21 +179,31 @@ def plot_decision_distribution(run_dir, decisions, labels):
 
 
 def plot_tau_M(run_dir, decisions):
-    plt.figure(figsize=(5, 5))
-
+    plt.figure(figsize=(15, 5))  # Wider figure to accommodate subplots
+    
     # Option 1: Rename columns before plotting
     decisions_renamed = decisions.copy()
     decisions_renamed.columns = [
-        # r"$\tau_{\text{base}}$",
-        # r"$\tau_{\text{large}}$",
+        r"$\tau_{\text{base}}$",
+        r"$\tau_{\text{large}}$",
         "$M$",
     ]
-    decisions_renamed.plot(kind="line")
+    
+    # Create subplots
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5), sharex=True)
+    parameter_names = decisions_renamed.columns
+    
+    for i, ax in enumerate(axes):
+        decisions_renamed.iloc[:, i].plot(kind="line", ax=ax)
+        ax.set_title(parameter_names[i])
+        ax.set_xlabel("Online time steps (t)")
+        ax.set_ylabel("Value")
+    
+    plt.suptitle("Development of Parameters", y=1.02)
+    plt.tight_layout()
+    plt.savefig(os.path.join(run_dir, "tau_M_development_subplots.pdf"), bbox_inches="tight")
 
-    plt.xlabel("Online time steps (t)")
-    plt.ylabel("Value")
-    plt.title("Development of Parameters")
-    plt.savefig(os.path.join(run_dir, "tau_M_development.pdf"), bbox_inches="tight")
+
 
 
 def set_seed(seed):

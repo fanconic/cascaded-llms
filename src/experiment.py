@@ -157,6 +157,10 @@ class Experiment:
                 collectors,
             )
 
+            if self.cfg.online.enable:
+                # Perform parameter optimization
+                self.decision_system.optimize_parameters(batch_decisions)
+
         return collectors
 
     def _process_batch_results(
@@ -348,8 +352,7 @@ class Experiment:
 
         plot_tau_M(
             self.run_dir,
-            # data[["tau_base", "tau_large", "M"]],
-            data[["M"]],
+            data[["tau_base", "tau_large", "M"]],
         )
 
         # Save metrics
