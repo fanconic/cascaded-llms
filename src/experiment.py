@@ -14,6 +14,7 @@ from src.utils import (
     plot_decision_distribution,
     plot_tau_M,
     plot_accuracy_vs_cost_D1,
+    plot_risk_and_cumulative_risk,
 )
 from src.online_sft import OnlineSFTTrainerLoRA
 from src.config import ExperimentConfig
@@ -159,7 +160,7 @@ class Experiment:
 
             if self.cfg.online.enable:
                 # Perform parameter optimization
-                self.decision_system.optimize_parameters(batch_decisions)
+                self.decision_system.update_parameters(batch_decisions)
 
         return collectors
 
@@ -353,6 +354,11 @@ class Experiment:
         plot_tau_M(
             self.run_dir,
             data[["tau_base", "tau_large", "M"]],
+        )
+
+        plot_risk_and_cumulative_risk(
+            self.run_dir,
+            data[["system_risk"]],
         )
 
         # Save metrics

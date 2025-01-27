@@ -9,6 +9,7 @@ import random
 from typing import Callable, List, Dict, Tuple, Any, Optional
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor
 from transformers import (
     AutoTokenizer,
@@ -18,7 +19,8 @@ from transformers import (
 )
 from src.config import ModelConfig, CostConfig, OnlineConfig
 from src.utils import extract_predictions
-from scipy.optimize import minimize
+from scipy.optimize import minimize, differential_evolution
+import numpy as np
 
 
 class AIDecisionSystem:
@@ -54,9 +56,40 @@ class AIDecisionSystem:
 
         # Online learning parameters
         self.online_enable = online_config.enable
-        self.tau_base = online_config.initial_uncertainty_threshold_base
-        self.tau_large = online_config.initial_uncertainty_threshold_large
-        self.M = online_config.initial_M
+        self.M = torch.nn.Parameter(
+            torch.tensor(
+                [online_config.initial_M],
+                dtype=torch.float32,
+                device=self.config.device,
+            ),
+            requires_grad=True,  # Ensure gradients are tracked
+        )
+        
+        self.tau_base = torch.nn.Parameter(
+            torch.tensor(
+                [online_config.initial_uncertainty_threshold_base],
+                dtype=torch.float32,
+                device=self.config.device,
+            ),
+            requires_grad=True,  # Ensure gradients are tracked
+        )
+
+        self.tau_large = torch.nn.Parameter(
+            torch.tensor(
+                [online_config.initial_uncertainty_threshold_large],
+                dtype=torch.float32,
+                device=self.config.device,
+            ),
+            requires_grad=True,  # Ensure gradients are tracked
+        )
+
+        self.optimizer = torch.optim.Adam(
+            [self.M, self.tau_base, self.tau_large], lr=0.1
+        )
+
+        # self.tau_base = torch.Tensor([online_config.initial_uncertainty_threshold_base]).to(self.config.device)
+        # self.tau_large = torch.Tensor([online_config.initial_uncertainty_threshold_large]).to(self.config.device)
+        # self.M = online_config.initial_M
         self.lr_tau = online_config.lr_tau
         self.lr_M = online_config.lr_M
         self.error_penalty = online_config.error_penalty
@@ -199,7 +232,7 @@ class AIDecisionSystem:
         """Make a decision for a single prompt."""
         u = random.random()
         if u < acceptance_prob:
-            if base_uncert > self.tau_base:
+            if base_uncert > F.softplus(self.tau_base):
                 return (
                     2,
                     expert_response,
@@ -217,7 +250,7 @@ class AIDecisionSystem:
                 u,
             )
         else:
-            if large_uncert > self.tau_large:
+            if large_uncert > F.softplus(self.tau_large):
                 return (
                     2,
                     expert_response,
@@ -238,67 +271,52 @@ class AIDecisionSystem:
                 u,
             )
 
-    def optimize_parameters(
-        self,
-        decisions: Dict,
-        bounds: Optional[List[Tuple[float, float]]] = None,
-        initial_guess: Optional[List[float]] = None,
-    ):
-        """
-        Optimize the parameters M, tau_base, and tau_large to minimize system risk.
+    def update_parameters(self, decisions):
+        """Update parameters using policy gradient."""
+        total_loss = 0.0
 
-        Args:
-            prompts: List of prompts for the models.
-            expert_responses: List of expert responses.
-            questions: List of questions.
-            precomputed_batch: Optional precomputed batch of data.
-            bounds: Optional bounds for M, tau_base, and tau_large.
-            initial_guess: Optional initial values for M, tau_base, and tau_large.
+        for decision in decisions:
+            # Extract relevant values
+            base_probs = torch.tensor(decision["base_probs"]).to(self.config.device)
+            large_probs_for_base = torch.tensor(decision["large_probs"]).to(
+                self.config.device
+            )
+            ratio = large_probs_for_base / (base_probs * F.softplus(self.M))
+            acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)
+            base_uncert = torch.tensor(decision["base_uncertainty"])
+            large_uncert = torch.tensor(decision["large_uncertainty"])
+            system_risk = self._calculate_system_risk(
+                self.M,
+                self.tau_base,
+                self.tau_large,
+                large_probs_for_base,
+                base_probs,
+                base_uncert,
+                large_uncert,
+                decision["base_prediction"],
+                decision["large_prediction"],
+                decision["label"],
+            ).to(self.config.device)
 
-        Returns:
-            result: Optimization result from scipy.optimize.minimize.
-        """
+            # Compute log-probability of the chosen action
+            # log_prob = self._compute_log_prob(
+            #     acceptance_prob, base_uncert, large_uncert, decision["decision"]
+            # )
 
-        # Define bounds if not provided
-        if bounds is None:
-            bounds = [(0.5, 4.0), (0.01, 1.0), (0.01, 1.0)]  # Default bounds
+            # Compute the loss (negative utility)
+            loss = system_risk  # REINFORCE loss
+            total_loss += loss
 
-        # Define initial guess if not provided
-        if initial_guess is None:
-            initial_guess = [self.M, self.tau_base, self.tau_large]
-
-        # Objective function to minimize
-        def objective(params):
-            M, tau_base, tau_large = params
-            total_system_risk = 0
-            for decision in decisions:
-                system_risk = self._calculate_system_risk(
-                    M, tau_base, tau_large, 
-                    large_probs_for_base=decision["large_probs"],
-                    base_probs=decision["base_probs"],
-                    base_uncertainties=decision["base_uncertainty"],
-                    large_uncertainties=decision["large_uncertainty"],
-                    base_predictions=decision["base_prediction"],
-                    large_predictions=decision["large_prediction"],
-                    expert_responses=decision["label"],
-                )
-                total_system_risk += system_risk
-            return total_system_risk
-
-        # Perform optimization
-        result = minimize(
-            fun=objective,
-            x0=initial_guess,
-            bounds=bounds,
-            method="L-BFGS-B",
-        )
-
-        # Update the parameters to the optimized values
-        self.M, self.tau_base, self.tau_large = result.x
+        # Perform gradient update
+        self.optimizer.zero_grad()
+        total_loss.backward()
+        self.optimizer.step()
 
     def _calculate_system_risk(
         self,
-        M, tau_base, tau_large,
+        M,
+        tau_base,
+        tau_large,
         large_probs_for_base,
         base_probs,
         base_uncertainties,
@@ -309,17 +327,23 @@ class AIDecisionSystem:
     ):
         # Calculate the system risk in this step
         # MvM
-        ratio = torch.Tensor([large_probs_for_base / (base_probs * M)])
+        ratio = large_probs_for_base / (base_probs * F.softplus(M))
+            
         acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)
 
         phi_mvm_0 = acceptance_prob
         phi_mvm_1 = 1 - acceptance_prob
 
         # MvH
-        phi_mvh_0_base = base_uncertainties < tau_base
-        phi_mvh_2_base = base_uncertainties >= tau_base
-        phi_mvh_0_large = large_uncertainties < tau_large
-        phi_mvh_2_large = large_uncertainties >= tau_large
+        phi_mvh_0_base = torch.sigmoid(F.softplus(tau_base) - base_uncertainties)
+        phi_mvh_2_base = 1 - phi_mvh_0_base
+        phi_mvh_0_large = torch.sigmoid(F.softplus(tau_large) - large_uncertainties)
+        phi_mvh_2_large = 1 - phi_mvh_0_large
+        
+        # phi_mvh_0_base = tau_base < base_uncertainties
+        # phi_mvh_2_base = tau_base >= base_uncertainties
+        # phi_mvh_0_large = tau_large < large_uncertainties
+        # phi_mvh_2_large = tau_large >= large_uncertainties
 
         # 01 loss
         l_y_base = self.costs.mistake_cost * (base_predictions != expert_responses)
@@ -354,7 +378,28 @@ class AIDecisionSystem:
         cost_part = Phi_0 * c_0 + Phi_1 * c_1 + Phi_2 * c_2 + Phi_3 * c_3
         system_risk = loss_part + cost_part
 
-        return system_risk
+        return system_risk.to("cpu")
+
+    def _compute_log_prob(self, acceptance_prob, base_uncert, large_uncert, decision):
+        """Compute the log-probability of the chosen action."""
+        if decision == 0:  # Base model chosen
+            log_prob = torch.log(acceptance_prob) + torch.log(
+                torch.sigmoid(self.tau_base - base_uncert)
+            )
+        elif decision == 1:  # Large model chosen
+            log_prob = torch.log(1 - acceptance_prob) + torch.log(
+                torch.sigmoid(self.tau_large - large_uncert)
+            )
+        elif decision == 2:  # Expert chosen
+            if base_uncert > self.tau_base:
+                log_prob = torch.log(acceptance_prob) + torch.log(
+                    1 - torch.sigmoid(self.tau_base - base_uncert)
+                )
+            else:
+                log_prob = torch.log(1 - acceptance_prob) + torch.log(
+                    1 - torch.sigmoid(self.tau_large - large_uncert)
+                )
+        return log_prob
 
     def decide_batch(
         self,
@@ -397,7 +442,9 @@ class AIDecisionSystem:
             prompts, questions, base_predictions, large_predictions, precomputed_batch
         )
 
-        ratio = large_probs_for_base / (base_probs * self.M)
+        ratio = large_probs_for_base.to(self.config.device) / (
+            base_probs.to(self.config.device) * F.softplus(self.M)
+        )
         acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)
 
         decisions = []
@@ -416,7 +463,9 @@ class AIDecisionSystem:
             )
 
             system_risk = self._calculate_system_risk(
-                self.M, self.tau_base, self.tau_large,
+                self.M,
+                self.tau_base,
+                self.tau_large,
                 large_probs_for_base[i],
                 base_probs[i],
                 base_uncertainties[i],
@@ -435,12 +484,8 @@ class AIDecisionSystem:
             )
 
             # Other system risk strategies
-            system_risk_base = (
-                l_y_base + self.costs.base_gen_cost
-            )
-            system_risk_large = (
-                l_y_large + self.costs.large_gen_cost
-            )
+            system_risk_base = l_y_base + self.costs.base_gen_cost
+            system_risk_large = l_y_large + self.costs.large_gen_cost
             system_risk_expert = self.costs.expert_cost
 
             decisions.append(
@@ -460,11 +505,11 @@ class AIDecisionSystem:
                     "acceptance_ratios": acceptance_prob[i].item(),
                     "base_probs": base_probs[i].item(),
                     "large_probs": large_probs_for_base[i].item(),
-                    "tau_base": self.tau_base,
-                    "tau_large": self.tau_large,
-                    "M": self.M,
+                    "tau_base": F.softplus(self.tau_base).item(),
+                    "tau_large": F.softplus(self.tau_large).item(),
+                    "M": F.softplus(self.M).item(),
                     "u": u,
-                    "system_risk": system_risk,
+                    "system_risk": system_risk.item(),
                     "system_risk_base": system_risk_base,
                     "system_risk_large": system_risk_large,
                     "system_risk_expert": system_risk_expert,

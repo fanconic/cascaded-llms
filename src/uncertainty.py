@@ -265,16 +265,16 @@ def surrogate_token_uncertainties(
     yes_id = yes_ids[0] if yes_ids else None
     no_id = no_ids[0] if no_ids else None
 
-    patch_dropout(model, 0.1)
+    # patch_dropout(model, 0.1)
 
     # Process in a single forward pass
     with torch.no_grad():
-        model.train()
+        # model.train()
         outputs = model(**inputs)
     logits = outputs.logits  # [batch_size * n, seq_len, vocab_size]
 
-    patch_dropout(model, 0.0)
-    model.eval()
+    # patch_dropout(model, 0.0)
+    # model.eval()
 
     # For memory efficiency, compute probabilities one batch at a time
     seq_len = inputs["input_ids"].size(1)  # Length of each sequence

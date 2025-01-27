@@ -180,7 +180,7 @@ def plot_decision_distribution(run_dir, decisions, labels):
 
 def plot_tau_M(run_dir, decisions):
     plt.figure(figsize=(15, 5))  # Wider figure to accommodate subplots
-    
+
     # Option 1: Rename columns before plotting
     decisions_renamed = decisions.copy()
     decisions_renamed.columns = [
@@ -188,22 +188,61 @@ def plot_tau_M(run_dir, decisions):
         r"$\tau_{\text{large}}$",
         "$M$",
     ]
-    
+
     # Create subplots
     fig, axes = plt.subplots(1, 3, figsize=(15, 5), sharex=True)
     parameter_names = decisions_renamed.columns
-    
+
     for i, ax in enumerate(axes):
         decisions_renamed.iloc[:, i].plot(kind="line", ax=ax)
         ax.set_title(parameter_names[i])
         ax.set_xlabel("Online time steps (t)")
         ax.set_ylabel("Value")
-    
+
     plt.suptitle("Development of Parameters", y=1.02)
     plt.tight_layout()
-    plt.savefig(os.path.join(run_dir, "tau_M_development_subplots.pdf"), bbox_inches="tight")
+    plt.savefig(
+        os.path.join(run_dir, "tau_M_development_subplots.pdf"), bbox_inches="tight"
+    )
 
 
+def plot_risk_and_cumulative_risk(run_dir, decisions):
+    """
+    Plots system risk and cumulative system risk in two subplots next to each other.
+
+    Args:
+        run_dir (str): Directory to save the plot.
+        decisions (DataFrame): DataFrame with system risk values over time.
+
+    Saves:
+        A plot with system risk and cumulative system risk as a PDF.
+    """
+    # Prepare the data
+    decisions_copy = decisions.copy()
+    decisions_copy.columns = ["System Risk"]
+    decisions_copy["Cumulative System Risk"] = decisions_copy["System Risk"].cumsum()
+
+    # Create the subplots
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5), sharex=True)
+
+    # Plot the system risk
+    decisions_copy["System Risk"].plot(ax=axes[0], kind="line")
+    axes[0].set_title("System Risk Over Time")
+    axes[0].set_xlabel("Online time steps (t)")
+    axes[0].set_ylabel("System Risk")
+
+    # Plot the cumulative system risk
+    decisions_copy["Cumulative System Risk"].plot(ax=axes[1], kind="line")
+    axes[1].set_title("Cumulative System Risk Over Time")
+    axes[1].set_xlabel("Online time steps (t)")
+    axes[1].set_ylabel("Cumulative System Risk")
+
+    # Adjust layout and save
+    plt.tight_layout()
+    os.makedirs(run_dir, exist_ok=True)  # Ensure the directory exists
+    plt.savefig(
+        os.path.join(run_dir, "risk_and_cumulative_risk.pdf"), bbox_inches="tight"
+    )
 
 
 def set_seed(seed):
