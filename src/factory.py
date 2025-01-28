@@ -29,6 +29,7 @@ class DecisionMakerFactory:
             device=exp_config.device,
             precomputed=exp_config.precomputed,
             uncertainty_samples=exp_config.uncertainty_samples,
+            batch_size=exp_config.batch_size,
         )
 
         cost_config_obj = CostConfig(**cost_config)

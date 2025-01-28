@@ -53,39 +53,42 @@ class AIDecisionSystem:
     ):
         self.config = model_config
         self.costs = cost_config
+        self.online_config = online_config
+
+        self.initial_M = torch.tensor(
+            [np.log(np.exp(online_config.initial_M) - 1)],
+            dtype=torch.float32,
+            device=self.config.device,
+        )
+        self.initial_tau_base = torch.tensor(
+            [np.log(np.exp(online_config.initial_uncertainty_threshold_base) - 1)],
+            dtype=torch.float32,
+            device=self.config.device,
+        )
+        self.initial_tau_large = torch.tensor(
+            [np.log(np.exp(online_config.initial_uncertainty_threshold_large) - 1)],
+            dtype=torch.float32,
+            device=self.config.device,
+        )
 
         # Online learning parameters
         self.online_enable = online_config.enable
         self.M = torch.nn.Parameter(
-            torch.tensor(
-                [online_config.initial_M],
-                dtype=torch.float32,
-                device=self.config.device,
-            ),
+            self.initial_M.clone(),
             requires_grad=True,  # Ensure gradients are tracked
         )
-        
+
         self.tau_base = torch.nn.Parameter(
-            torch.tensor(
-                [online_config.initial_uncertainty_threshold_base],
-                dtype=torch.float32,
-                device=self.config.device,
-            ),
+            self.initial_tau_base.clone(),
             requires_grad=True,  # Ensure gradients are tracked
         )
 
         self.tau_large = torch.nn.Parameter(
-            torch.tensor(
-                [online_config.initial_uncertainty_threshold_large],
-                dtype=torch.float32,
-                device=self.config.device,
-            ),
-            requires_grad=True,  # Ensure gradients are tracked
+            self.initial_tau_large.clone(),
+            requires_grad=False,  # Ensure gradients are tracked
         )
 
-        self.optimizer = torch.optim.Adam(
-            [self.M, self.tau_base, self.tau_large], lr=0.1
-        )
+        self.optimizer = torch.optim.Adam([self.M], lr=online_config.lr_tau)
 
         # self.tau_base = torch.Tensor([online_config.initial_uncertainty_threshold_base]).to(self.config.device)
         # self.tau_large = torch.Tensor([online_config.initial_uncertainty_threshold_large]).to(self.config.device)
@@ -93,6 +96,10 @@ class AIDecisionSystem:
         self.lr_tau = online_config.lr_tau
         self.lr_M = online_config.lr_M
         self.error_penalty = online_config.error_penalty
+
+        # Replay buffer to store past decisions
+        self.replay_buffer = []
+        self.batch_size = 7  # self.config.batch_size
 
         # Store functions
         self.verification_fn = verification_fn
@@ -235,7 +242,7 @@ class AIDecisionSystem:
             if base_uncert > F.softplus(self.tau_base):
                 return (
                     2,
-                    expert_response,
+                    f"Expert Reponse: The best answer is {expert_response}",
                     self.costs.base_gen_cost
                     + self.costs.large_inf_cost
                     + self.costs.expert_cost,
@@ -253,7 +260,7 @@ class AIDecisionSystem:
             if large_uncert > F.softplus(self.tau_large):
                 return (
                     2,
-                    expert_response,
+                    f"Expert Reponse: The best answer is {expert_response}",
                     self.costs.base_gen_cost
                     + self.costs.large_inf_cost
                     + self.costs.large_gen_cost
@@ -271,46 +278,57 @@ class AIDecisionSystem:
                 u,
             )
 
-    def update_parameters(self, decisions):
-        """Update parameters using policy gradient."""
-        total_loss = 0.0
+    def update_parameters(self):
+        """Update model parameters using minibatches from the replay buffer."""
+        if len(self.replay_buffer) < self.batch_size:
+            return  # Not enough data to update
 
-        for decision in decisions:
-            # Extract relevant values
-            base_probs = torch.tensor(decision["base_probs"]).to(self.config.device)
-            large_probs_for_base = torch.tensor(decision["large_probs"]).to(
-                self.config.device
-            )
-            ratio = large_probs_for_base / (base_probs * F.softplus(self.M))
-            acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)
-            base_uncert = torch.tensor(decision["base_uncertainty"])
-            large_uncert = torch.tensor(decision["large_uncertainty"])
-            system_risk = self._calculate_system_risk(
-                self.M,
-                self.tau_base,
-                self.tau_large,
-                large_probs_for_base,
-                base_probs,
-                base_uncert,
-                large_uncert,
-                decision["base_prediction"],
-                decision["large_prediction"],
-                decision["label"],
-            ).to(self.config.device)
+        # self.M.data = torch.Tensor([np.log(np.exp(self.online_config.initial_uncertainty_threshold_large) - 1)]).to(self.config.device)
+        # self.tau_base.data = torch.Tensor([np.log(np.exp(self.online_config.initial_uncertainty_threshold_large) - 1)]).to(self.config.device)
+        # self.tau_large.data = torch.Tensor([np.log(np.exp(self.online_config.initial_uncertainty_threshold_large) - 1)]).to(self.config.device)
 
-            # Compute log-probability of the chosen action
-            # log_prob = self._compute_log_prob(
-            #     acceptance_prob, base_uncert, large_uncert, decision["decision"]
-            # )
+        for i in range(
+            len(self.replay_buffer) // self.batch_size - 1
+        ):  # Perform multiple gradient steps
+            # Sample a random minibatch from the replay buffer
+            minibatch = self.replay_buffer[
+                i * self.batch_size : i * self.batch_size + self.batch_size
+            ]
 
-            # Compute the loss (negative utility)
-            loss = system_risk  # REINFORCE loss
-            total_loss += loss
+            total_loss = 0.0
+            for decision in minibatch:
+                # Extract relevant data for this decision
+                base_probs = torch.tensor(decision["base_probs"]).to(self.config.device)
+                large_probs_for_base = torch.tensor(decision["large_probs"]).to(
+                    self.config.device
+                )
+                base_uncert = torch.tensor(decision["base_uncertainty"])
+                large_uncert = torch.tensor(decision["large_uncertainty"])
+                label = decision["label"]
 
-        # Perform gradient update
-        self.optimizer.zero_grad()
-        total_loss.backward()
-        self.optimizer.step()
+                # Compute system risk
+                system_risk = self._calculate_system_risk(
+                    self.M,
+                    self.tau_base,
+                    self.tau_large,
+                    large_probs_for_base,
+                    base_probs,
+                    base_uncert,
+                    large_uncert,
+                    decision["base_prediction"],
+                    decision["large_prediction"],
+                    label,
+                ).to(self.config.device)
+
+                total_loss += system_risk
+
+            # Normalize the loss over the minibatch
+            total_loss /= self.batch_size
+
+            # Perform gradient update
+            self.optimizer.zero_grad()
+            total_loss.backward()
+            self.optimizer.step()
 
     def _calculate_system_risk(
         self,
@@ -328,7 +346,7 @@ class AIDecisionSystem:
         # Calculate the system risk in this step
         # MvM
         ratio = large_probs_for_base / (base_probs * F.softplus(M))
-            
+
         acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)
 
         phi_mvm_0 = acceptance_prob
@@ -339,11 +357,11 @@ class AIDecisionSystem:
         phi_mvh_2_base = 1 - phi_mvh_0_base
         phi_mvh_0_large = torch.sigmoid(F.softplus(tau_large) - large_uncertainties)
         phi_mvh_2_large = 1 - phi_mvh_0_large
-        
-        # phi_mvh_0_base = tau_base < base_uncertainties
-        # phi_mvh_2_base = tau_base >= base_uncertainties
-        # phi_mvh_0_large = tau_large < large_uncertainties
-        # phi_mvh_2_large = tau_large >= large_uncertainties
+
+        # phi_mvh_0_base = base_uncertainties < F.softplus(tau_base)
+        # phi_mvh_2_base = base_uncertainties >= F.softplus(tau_base)
+        # phi_mvh_0_large = large_uncertainties < F.softplus(tau_large)
+        # phi_mvh_2_large = large_uncertainties >= F.softplus(tau_large)
 
         # 01 loss
         l_y_base = self.costs.mistake_cost * (base_predictions != expert_responses)
@@ -475,6 +493,19 @@ class AIDecisionSystem:
                 expert_responses[i],
             )
 
+            system_risk_static = self._calculate_system_risk(
+                self.initial_M,
+                self.initial_tau_base,
+                self.initial_tau_base,
+                large_probs_for_base[i],
+                base_probs[i],
+                base_uncertainties[i],
+                large_uncertainties[i],
+                base_predictions[i],
+                large_predictions[i],
+                expert_responses[i],
+            )
+
             # 01 loss
             l_y_base = self.costs.mistake_cost * (
                 base_predictions[i] != expert_responses[i]
@@ -513,8 +544,16 @@ class AIDecisionSystem:
                     "system_risk_base": system_risk_base,
                     "system_risk_large": system_risk_large,
                     "system_risk_expert": system_risk_expert,
+                    "system_risk_static": system_risk_static,
                     "label": expert_responses[i],
                 }
             )
+
+        # Add decisions to the replay buffer
+        self.replay_buffer.extend(decisions)
+
+        # Update model parameters after batch processing
+        if self.online_enable:
+            self.update_parameters()
 
         return decisions

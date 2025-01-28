@@ -42,6 +42,7 @@ class Experiment:
             device=cfg.device,
             precomputed=cfg.precomputed,
             uncertainty_samples=cfg.uncertainty_samples,
+            batch_size=cfg.batch_size,
         )
 
         self.decision_system = DecisionMakerFactory.create_decision_maker(
@@ -124,6 +125,7 @@ class Experiment:
             "system_risk_base": [],
             "system_risk_large": [],
             "system_risk_expert": [],
+            "system_risk_static": [],
         }
 
         precomputed_batch = None
@@ -157,10 +159,6 @@ class Experiment:
                 batch,
                 collectors,
             )
-
-            if self.cfg.online.enable:
-                # Perform parameter optimization
-                self.decision_system.update_parameters(batch_decisions)
 
         return collectors
 
@@ -218,6 +216,7 @@ class Experiment:
         collectors["system_risk_base"].append(decision["system_risk_base"])
         collectors["system_risk_large"].append(decision["system_risk_large"])
         collectors["system_risk_expert"].append(decision["system_risk_expert"])
+        collectors["system_risk_static"].append(decision["system_risk_static"])
 
     def _create_dataframe_dict(self, collectors: Dict) -> Dict:
         """Create dictionary for DataFrame creation from collectors."""
@@ -246,6 +245,7 @@ class Experiment:
             "system_risk_base": collectors["system_risk_base"],
             "system_risk_large": collectors["system_risk_large"],
             "system_risk_expert": collectors["system_risk_expert"],
+            "system_risk_static": collectors["system_risk_static"],
         }
 
     def _analyze_and_save_results(self, results: Dict):
@@ -315,6 +315,7 @@ class Experiment:
         system_risk_base = data["system_risk_base"].mean()
         system_risk_large = data["system_risk_large"].mean()
         system_risk_expert = data["system_risk_expert"].mean()
+        system_risk_static = data["system_risk_static"].mean()
 
         # Generate plots
         plot_accuracy_vs_cost(
@@ -358,7 +359,15 @@ class Experiment:
 
         plot_risk_and_cumulative_risk(
             self.run_dir,
-            data[["system_risk"]],
+            data[
+                [
+                    "system_risk",
+                    "system_risk_base",
+                    "system_risk_large",
+                    "system_risk_static",
+                    "M",
+                ]
+            ],
         )
 
         # Save metrics
@@ -379,6 +388,7 @@ class Experiment:
             "system_risk_base": system_risk_base,
             "system_risk_large": system_risk_large,
             "system_risk_expert": system_risk_expert,
+            "system_risk_static": system_risk_static,
         }
 
         # Save metrics to file
@@ -426,6 +436,7 @@ class Experiment:
         system_risk_base = metrics["system_risk_base"]
         system_risk_large = metrics["system_risk_large"]
         system_risk_expert = metrics["system_risk_expert"]
+        system_risk_static = metrics["system_risk_static"]
 
         # 3. Print your original performance table as before
         rows = [
@@ -454,6 +465,12 @@ class Experiment:
                 f"{system_risk_expert:.2f}",
             ],
             [
+                "Static System",
+                f"N/A",
+                f"N/A",
+                f"{system_risk_static:.2f}",
+            ],
+            [
                 "Dynamic System",
                 f"{metrics['dynamic_accuracy']:.3f} ± {metrics['dynamic_accuracy_err']:.3f}",
                 f"{cost_per_sample_dynamic:.2f}",
@@ -475,9 +492,9 @@ class Experiment:
 
         print("\nIncremental Cost-Benefit:")
         print("====================")
-        print(f"∆IBC(Base -> Large):\t {metrics['dibc_base2large']:.1f}")
-        print(f"∆IBC(Base -> Expert):\t {metrics['dibc_base2expert']:.1f}")
-        print(f"∆IBC(Large -> Expert):\t {metrics['dibc_large2expert']:.1f}")
+        print(f"∆IBC(Base -> Large):\t {metrics['dibc_base2large']:.2f}")
+        print(f"∆IBC(Base -> Expert):\t {metrics['dibc_base2expert']:.2f}")
+        print(f"∆IBC(Large -> Expert):\t {metrics['dibc_large2expert']:.2f}")
 
         print("\nDecision Distribution:")
         print("====================")

@@ -30,6 +30,7 @@ class ModelConfig:
     device: str = "cpu"
     prompt_template: str = ""
     uncertainty_samples: int = 1
+    batch_size: int = 5
 
 
 @dataclass
@@ -56,6 +57,7 @@ class ExperimentConfig:
     device: str
     precomputed: Dict
     uncertainty_samples: int = 1
+    batch_size: int = 5
 
     def __post_init__(self):
         self.verification_fn = VERIFICATION_FN_MAPPING[self.verification_fn]

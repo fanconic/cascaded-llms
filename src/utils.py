@@ -218,31 +218,82 @@ def plot_risk_and_cumulative_risk(run_dir, decisions):
         A plot with system risk and cumulative system risk as a PDF.
     """
     # Prepare the data
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    base_color = colors[0]  # First system color
+    large_color = colors[1]  # Second system color
+    static_color = colors[2]  # Third system color
+    dynamic_color = colors[3]  # Third system color
+
     decisions_copy = decisions.copy()
-    decisions_copy.columns = ["System Risk"]
-    decisions_copy["Cumulative System Risk"] = decisions_copy["System Risk"].cumsum()
+    decisions_copy.columns = ["Dynamic", "Base", "Large", "Static", "M"]
+    decisions_copy["Cumulative Dynamic"] = decisions_copy["Dynamic"].cumsum()- decisions_copy["Dynamic"].cumsum()
+    decisions_copy["Cumulative Base"] = decisions_copy["Base"].cumsum()- decisions_copy["Dynamic"].cumsum()
+    decisions_copy["Cumulative Large"] = decisions_copy["Large"].cumsum()- decisions_copy["Dynamic"].cumsum()
+    decisions_copy["Cumulative Static"] = decisions_copy["Static"].cumsum()- decisions_copy["Dynamic"].cumsum()
+
 
     # Create the subplots
-    fig, axes = plt.subplots(1, 2, figsize=(10, 5), sharex=True)
-
-    # Plot the system risk
-    decisions_copy["System Risk"].plot(ax=axes[0], kind="line")
-    axes[0].set_title("System Risk Over Time")
-    axes[0].set_xlabel("Online time steps (t)")
-    axes[0].set_ylabel("System Risk")
+    fig, axes = plt.subplots(1, 2, figsize=(8, 4), sharex=True)
 
     # Plot the cumulative system risk
-    decisions_copy["Cumulative System Risk"].plot(ax=axes[1], kind="line")
-    axes[1].set_title("Cumulative System Risk Over Time")
+    axes[0].plot(
+        decisions_copy.index,
+        decisions_copy["Cumulative Base"],
+        label="Base",
+        color=base_color,
+        alpha=0.8
+    )
+    axes[0].plot(
+        decisions_copy.index,
+        decisions_copy["Cumulative Large"],
+        label="Large",
+        color=large_color,
+        alpha=0.8
+    )
+    axes[0].plot(
+        decisions_copy.index,
+        decisions_copy["Cumulative Static"],
+        label="Static",
+        color=static_color,
+        alpha=0.8
+    )
+    axes[0].plot(
+        decisions_copy.index,
+        decisions_copy["Cumulative Dynamic"],
+        label="Dynamic",
+        color=dynamic_color,
+        linestyle="--",
+        alpha=0.8
+    )
+    axes[0].set_title("Cumulative Regret over Time")
+    axes[0].set_xlabel("Online time steps (t)")
+    axes[0].set_ylabel("Cumulative Regret")
+    axes[0].legend()
+
+    # Plot the system risk
+    axes[1].plot(
+        decisions_copy.index,
+        np.ones(len(decisions_copy)) * decisions_copy["M"].iloc[0],
+        label=r"Static $M$",
+        linestyle="--",
+        color=static_color,
+    )
+    axes[1].plot(
+        decisions_copy.index,
+        decisions_copy["M"],
+        label=r"Dynamic $M$",
+        color=dynamic_color,
+    )
+    axes[1].set_title(r"$M$ Parameter over Time")
     axes[1].set_xlabel("Online time steps (t)")
-    axes[1].set_ylabel("Cumulative System Risk")
+    axes[1].set_ylabel(r"$M$")
+    axes[1].legend()
 
     # Adjust layout and save
     plt.tight_layout()
     os.makedirs(run_dir, exist_ok=True)  # Ensure the directory exists
-    plt.savefig(
-        os.path.join(run_dir, "risk_and_cumulative_risk.pdf"), bbox_inches="tight"
-    )
+    plt.savefig(os.path.join(run_dir, "cumulative_risk_and_M.pdf"), bbox_inches="tight")
+    plt.close()
 
 
 def set_seed(seed):
