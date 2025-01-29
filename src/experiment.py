@@ -365,6 +365,7 @@ class Experiment:
                     "system_risk_base",
                     "system_risk_large",
                     "system_risk_static",
+                    "system_risk_expert",
                     "M",
                 ]
             ],

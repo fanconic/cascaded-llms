@@ -2,19 +2,19 @@ seed: 42
 results_dir: results
 max_new_tokens: 512
 costs:
-  base_gen_cost: 5.0
-  large_inf_cost: 0.3
+  base_gen_cost: 1.0
+  large_inf_cost: 0.55
   large_gen_cost: 10.0
-  expert_cost: 15.0
-  mistake_cost: 43.86
+  expert_cost: 18.83
+  mistake_cost: 27.52
 base_model: meta-llama/Llama-3.2-1B-Instruct
 large_model: meta-llama/Llama-3.1-3B-Instruct
-batch_size: 30
+batch_size: 34
 max_input_length: 512
 online:
   enable: true
-  initial_uncertainty_threshold_base: 500
-  initial_uncertainty_threshold_large: 500
+  initial_uncertainty_threshold_base: 0.5
+  initial_uncertainty_threshold_large: 0.1
   initial_M: 1.0
   lr_tau: 0.01
   lr_M: 0.005
@@ -34,11 +34,11 @@ precomputed:
   generation: true
   verification: true
   uncertainty: true
-  path: /home/azureuser/caf83/helm/results/20250123/medqa/run_20250123_125447_medqa_models_3_8/results_medqa_models_3_8.csv
+  path: /home/azureuser/caf83/helm/results/20250123/medqa/run_20250123_115838_medqa_models_1_8/results_medqa_models_1_8.csv
 dataset:
   name: HuggingSara/medqa
   subset: null
   split: validation
   num_samples: -1
 device: cuda:0
-name_postfix: medqa_3_8_online
+name_postfix: medqa_1_8_full_0
