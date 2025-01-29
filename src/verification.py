@@ -1,13 +1,3 @@
-"""
-This script contains the efficient verification strategies:
-- surrogate token probabilities (batched)
-- sequence probabilities (batched)
-- verbalisation (batched)
-
-Source: https://aclanthology.org/2024.acl-long.250.pdf
-author: Claudio Fanconi + GPT
-"""
-
 import torch
 import torch.nn.functional as F
 

@@ -1,4 +1,4 @@
-# Collaborative Decision-Making
+# Towards a Multi-LLM Framework for Collaborative Human-AI Decision-Making
 
 ## Getting Started
 
