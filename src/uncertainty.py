@@ -1,10 +1,3 @@
-""" 
-This script contains the efficient uncertainty estimation strategies
-
-- per token entropy
-author: Claudio Fanconi
-"""
-
 import torch
 import torch.nn.functional as F
 

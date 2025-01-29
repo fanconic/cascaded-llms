@@ -5,6 +5,7 @@
 ### Prerequisites
 - Python 3.11
 - CUDA toolkit 12.2 (for GPU support)
+- 1 x A100 (80GB) GPU
 
 ### Installation
 
@@ -22,5 +23,5 @@ conda activate llms
 
 ### Run main file
 ```bash
-python main.py --config-name=MedQA_config
+python main.py
 ```
