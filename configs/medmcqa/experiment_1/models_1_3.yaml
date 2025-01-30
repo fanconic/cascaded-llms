@@ -1,0 +1,44 @@
+seed: 42
+results_dir: results
+max_new_tokens: 512
+costs:
+  base_gen_cost: 1.0
+  large_inf_cost: 0.3
+  large_gen_cost: 5.0
+  expert_cost: 0
+  mistake_cost: 0
+base_model: meta-llama/Llama-3.2-1B-Instruct
+large_model: meta-llama/Llama-3.2-3B-Instruct
+batch_size: 7
+max_input_length: 512
+online:
+  enable: true
+  initial_uncertainty_threshold_base: 100 # artificially high --> no escalation
+  initial_uncertainty_threshold_large: 100 # artificially high --> no escalation
+  initial_M: 1.0
+  lr_tau: 0.01
+  lr_M: 0.005
+  error_penalty: 10
+sft:
+  enable: false
+  learning_rate: 0.0001
+  buffer_size: 1
+  lora_r: 32
+  lora_alpha: 64
+  lora_dropout: 0.1
+verification_fn: surrogate_token_probs
+uncertainty_fn: surrogate_token_uncertainties
+uncertainty_samples: 5
+precomputed:
+  enable: false
+  generation: false
+  verification: false
+  uncertainty: false
+  path: /home/
+dataset:
+  name: openlifescienceai/medmcqa
+  subset: 
+  split: validation
+  num_samples: -1
+device: cuda:1
+name_postfix: experiment_1__medmcqa_1_3

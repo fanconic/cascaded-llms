@@ -88,7 +88,9 @@ class AIDecisionSystem:
             requires_grad=True,  # Ensure gradients are tracked
         )
 
-        self.optimizer = torch.optim.Adam([self.M, self.tau_base, self.tau_large], lr=online_config.lr_tau)
+        self.optimizer = torch.optim.Adam(
+            [self.M, self.tau_base, self.tau_large], lr=online_config.lr_tau
+        )
         self.temperature = 0.01
         # self.tau_base = torch.Tensor([online_config.initial_uncertainty_threshold_base]).to(self.config.device)
         # self.tau_large = torch.Tensor([online_config.initial_uncertainty_threshold_large]).to(self.config.device)
@@ -281,7 +283,7 @@ class AIDecisionSystem:
     def update_parameters(self):
         """Update model parameters using minibatches from the replay buffer."""
         random.shuffle(self.replay_buffer)
-        
+
         if len(self.replay_buffer) < self.batch_size:
             return  # Not enough data to update
 
@@ -355,9 +357,13 @@ class AIDecisionSystem:
         phi_mvm_1 = 1 - acceptance_prob
 
         # MvH
-        phi_mvh_0_base = torch.sigmoid((F.softplus(tau_base) - base_uncertainties)/self.temperature)
+        phi_mvh_0_base = torch.sigmoid(
+            (F.softplus(tau_base) - base_uncertainties) / self.temperature
+        )
         phi_mvh_2_base = 1 - phi_mvh_0_base
-        phi_mvh_0_large = torch.sigmoid((F.softplus(tau_large) - large_uncertainties)/self.temperature)
+        phi_mvh_0_large = torch.sigmoid(
+            (F.softplus(tau_large) - large_uncertainties) / self.temperature
+        )
         phi_mvh_2_large = 1 - phi_mvh_0_large
 
         # phi_mvh_0_base = base_uncertainties < F.softplus(tau_base)

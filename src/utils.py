@@ -227,15 +227,24 @@ def plot_risk_and_cumulative_risk(run_dir, decisions):
 
     decisions_copy = decisions.copy()
     decisions_copy.columns = ["Dynamic", "Base", "Large", "Static", "Expert", "M"]
-    decisions_copy["Cumulative Dynamic"] = decisions_copy["Dynamic"].cumsum()- decisions_copy["Dynamic"].cumsum()
-    decisions_copy["Cumulative Base"] = decisions_copy["Base"].cumsum()- decisions_copy["Dynamic"].cumsum()
-    decisions_copy["Cumulative Large"] = decisions_copy["Large"].cumsum()- decisions_copy["Dynamic"].cumsum()
-    decisions_copy["Cumulative Static"] = decisions_copy["Static"].cumsum()- decisions_copy["Dynamic"].cumsum()
-    decisions_copy["Cumulative Expert"] = decisions_copy["Expert"].cumsum()- decisions_copy["Dynamic"].cumsum()
-
+    decisions_copy["Cumulative Dynamic"] = (
+        decisions_copy["Dynamic"].cumsum() - decisions_copy["Dynamic"].cumsum()
+    )
+    decisions_copy["Cumulative Base"] = (
+        decisions_copy["Base"].cumsum() - decisions_copy["Dynamic"].cumsum()
+    )
+    decisions_copy["Cumulative Large"] = (
+        decisions_copy["Large"].cumsum() - decisions_copy["Dynamic"].cumsum()
+    )
+    decisions_copy["Cumulative Static"] = (
+        decisions_copy["Static"].cumsum() - decisions_copy["Dynamic"].cumsum()
+    )
+    decisions_copy["Cumulative Expert"] = (
+        decisions_copy["Expert"].cumsum() - decisions_copy["Dynamic"].cumsum()
+    )
 
     # Create the subplots
-    plt.figure(figsize=(4,4))
+    plt.figure(figsize=(4, 4))
 
     # Plot the cumulative system risk
     plt.plot(
@@ -243,21 +252,21 @@ def plot_risk_and_cumulative_risk(run_dir, decisions):
         decisions_copy["Cumulative Base"],
         label="Base",
         color=base_color,
-        alpha=0.8
+        alpha=0.8,
     )
     plt.plot(
         decisions_copy.index,
         decisions_copy["Cumulative Large"],
         label="Large",
         color=large_color,
-        alpha=0.8
+        alpha=0.8,
     )
     plt.plot(
         decisions_copy.index,
         decisions_copy["Cumulative Static"],
         label="Static",
         color=static_color,
-        alpha=0.8
+        alpha=0.8,
     )
     plt.plot(
         decisions_copy.index,
@@ -265,27 +274,29 @@ def plot_risk_and_cumulative_risk(run_dir, decisions):
         label="Dynamic",
         color=dynamic_color,
         linestyle="--",
-        alpha=0.8
+        alpha=0.8,
     )
     plt.plot(
         decisions_copy.index,
         decisions_copy["Cumulative Expert"],
         label="Expert",
         color=expert_color,
-        alpha=0.8
+        alpha=0.8,
     )
     plt.xlabel("Online time steps (t)")
     plt.ylabel("Cumulative Regret")
     plt.legend()
-    
+
     plt.tight_layout()
     os.makedirs(run_dir, exist_ok=True)  # Ensure the directory exists
-    plt.savefig(os.path.join(run_dir, "cumulative_regret_over_time.pdf"), bbox_inches="tight")
+    plt.savefig(
+        os.path.join(run_dir, "cumulative_regret_over_time.pdf"), bbox_inches="tight"
+    )
     plt.close()
 
     # Plot the system risk
-    plt.figure(figsize=(4,4))
-    
+    plt.figure(figsize=(4, 4))
+
     plt.plot(
         decisions_copy.index,
         np.ones(len(decisions_copy)) * decisions_copy["M"].iloc[0],

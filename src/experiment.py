@@ -1,6 +1,6 @@
 import os
 import datetime
-from typing import Dict, Tuple
+from typing import Dict
 
 import numpy as np
 import pandas as pd
@@ -16,10 +16,8 @@ from src.utils import (
     plot_accuracy_vs_cost_D1,
     plot_risk_and_cumulative_risk,
 )
-from src.online_sft import OnlineSFTTrainerLoRA
 from src.config import ExperimentConfig
 from src.factory import DecisionMakerFactory
-from src.utils import extract_predictions
 from src.preprocessor import get_preprocessor
 
 
@@ -168,19 +166,9 @@ class Experiment:
         batch,
         collectors,
     ):
-        prompts = batch["prompts"]
-
         for i, decision in enumerate(batch_decisions):
             self._update_collectors(collectors, decision, batch["answer"][i])
 
-            if self.sft_trainers:
-                self._update_sft_trainers(
-                    decision,
-                    prompts[i],
-                    large_predictions[i],
-                    batch["output"][i][0],
-                    collectors["acceptance_ratios"][-1],
-                )
 
     def _update_collectors(self, collectors: Dict, decision: Dict, label: str) -> None:
         """Update result collectors with batch decision data."""
