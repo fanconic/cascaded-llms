@@ -217,36 +217,53 @@ def plot_risk_and_cumulative_risk(run_dir, decisions):
     Saves:
         A plot with system risk and cumulative system risk as a PDF.
     """
+
     # Prepare the data
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
     base_color = colors[0]  # First system color
     large_color = colors[1]  # Second system color
     static_color = colors[2]  # Third system color
-    dynamic_color = colors[3]  # Third system color
-    expert_color = colors[4]  # Third system color
+    dynamic_color = colors[3]  # Fourth system color
+    expert_color = colors[4]  # Fifth system color
 
     decisions_copy = decisions.copy()
     decisions_copy.columns = ["Dynamic", "Base", "Large", "Static", "Expert", "M"]
-    decisions_copy["Cumulative Dynamic"] = (
-        decisions_copy["Dynamic"].cumsum() - decisions_copy["Dynamic"].cumsum()
-    )
-    decisions_copy["Cumulative Base"] = (
-        decisions_copy["Base"].cumsum() - decisions_copy["Dynamic"].cumsum()
-    )
-    decisions_copy["Cumulative Large"] = (
-        decisions_copy["Large"].cumsum() - decisions_copy["Dynamic"].cumsum()
-    )
-    decisions_copy["Cumulative Static"] = (
-        decisions_copy["Static"].cumsum() - decisions_copy["Dynamic"].cumsum()
-    )
-    decisions_copy["Cumulative Expert"] = (
-        decisions_copy["Expert"].cumsum() - decisions_copy["Dynamic"].cumsum()
-    )
+    # Compute cumulative risk relative to the Dynamic system
+    decisions_copy["Cumulative Dynamic"] = decisions_copy["Dynamic"].cumsum() - decisions_copy["Dynamic"].cumsum()  # will be zero
+    decisions_copy["Cumulative Base"] = decisions_copy["Base"].cumsum() - decisions_copy["Dynamic"].cumsum()
+    decisions_copy["Cumulative Large"] = decisions_copy["Large"].cumsum() - decisions_copy["Dynamic"].cumsum()
+    decisions_copy["Cumulative Static"] = decisions_copy["Static"].cumsum() - decisions_copy["Dynamic"].cumsum()
+    decisions_copy["Cumulative Expert"] = decisions_copy["Expert"].cumsum() - decisions_copy["Dynamic"].cumsum()
 
-    # Create the subplots
+    # Calculate confidence intervals (95%)
+    # Using bootstrap method to estimate confidence intervals
+    n_bootstrap = 1000
+    alpha = 0.05  # 95% confidence interval
+    
+    # Function to calculate bootstrap confidence intervals
+    def bootstrap_ci(data, n_bootstrap=n_bootstrap, alpha=alpha):
+        bootstrap_samples = np.zeros((n_bootstrap, len(data)))
+        for i in range(n_bootstrap):
+            # Sample with replacement and sort the indices to preserve time order
+            indices = np.sort(np.random.choice(len(data), size=len(data), replace=True))
+            bootstrap_samples[i] = (
+                np.cumsum(data.iloc[indices].values) - 
+                np.cumsum(decisions_copy["Dynamic"].iloc[indices].values)
+            )
+        lower = np.percentile(bootstrap_samples, alpha/2 * 100, axis=0)
+        upper = np.percentile(bootstrap_samples, (1 - alpha/2) * 100, axis=0)
+        return lower, upper
+    
+    # Calculate CIs for each system
+    base_lower, base_upper = bootstrap_ci(decisions_copy["Base"])
+    large_lower, large_upper = bootstrap_ci(decisions_copy["Large"])
+    static_lower, static_upper = bootstrap_ci(decisions_copy["Static"])
+    expert_lower, expert_upper = bootstrap_ci(decisions_copy["Expert"])
+    
+    # Create the plot
     plt.figure(figsize=(4, 4))
 
-    # Plot the cumulative system risk
+    # Plot the cumulative system risk with confidence intervals
     plt.plot(
         decisions_copy.index,
         decisions_copy["Cumulative Base"],
@@ -254,6 +271,14 @@ def plot_risk_and_cumulative_risk(run_dir, decisions):
         color=base_color,
         alpha=0.8,
     )
+    plt.fill_between(
+        decisions_copy.index,
+        base_lower,
+        base_upper,
+        color=base_color,
+        alpha=0.2,
+    )
+    
     plt.plot(
         decisions_copy.index,
         decisions_copy["Cumulative Large"],
@@ -261,6 +286,14 @@ def plot_risk_and_cumulative_risk(run_dir, decisions):
         color=large_color,
         alpha=0.8,
     )
+    plt.fill_between(
+        decisions_copy.index,
+        large_lower,
+        large_upper,
+        color=large_color,
+        alpha=0.2,
+    )
+    
     plt.plot(
         decisions_copy.index,
         decisions_copy["Cumulative Static"],
@@ -268,6 +301,14 @@ def plot_risk_and_cumulative_risk(run_dir, decisions):
         color=static_color,
         alpha=0.8,
     )
+    plt.fill_between(
+        decisions_copy.index,
+        static_lower,
+        static_upper,
+        color=static_color,
+        alpha=0.2,
+    )
+    
     plt.plot(
         decisions_copy.index,
         decisions_copy["Cumulative Dynamic"],
@@ -276,6 +317,7 @@ def plot_risk_and_cumulative_risk(run_dir, decisions):
         linestyle="--",
         alpha=0.8,
     )
+    
     plt.plot(
         decisions_copy.index,
         decisions_copy["Cumulative Expert"],
@@ -283,6 +325,14 @@ def plot_risk_and_cumulative_risk(run_dir, decisions):
         color=expert_color,
         alpha=0.8,
     )
+    plt.fill_between(
+        decisions_copy.index,
+        expert_lower,
+        expert_upper,
+        color=expert_color,
+        alpha=0.2,
+    )
+    
     plt.xlabel("Online time steps (t)")
     plt.ylabel("Cumulative Regret")
     plt.legend()

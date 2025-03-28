@@ -1,0 +1,45 @@
+seed: 42
+results_dir: results
+max_new_tokens: 512
+costs:
+  base_gen_cost: 1.0
+  large_inf_cost: 0.55
+  large_gen_cost: 10.0
+  expert_cost: 30.79 # Adjusted to fir system risk
+  mistake_cost: 44.71 # Adjusted to fir system risk
+base_model: Qwen/Qwen2.5-1.5B-Instruct
+large_model: Qwen/Qwen2.5-7B-Instruct
+batch_size: 34
+max_input_length: 512
+online:
+  enable: true
+  initial_uncertainty_threshold_base: 0.347
+  initial_uncertainty_threshold_large: 0.347
+  initial_M: 1.0
+  lr_tau: 0.01
+  lr_M: 0.005
+  error_penalty: 10
+sft:
+  enable: false
+  learning_rate: 0.0001
+  buffer_size: 1
+  lora_r: 32
+  lora_alpha: 64
+  lora_dropout: 0.1
+verification_fn: surrogate_token_probs
+uncertainty_fn: surrogate_token_uncertainties
+uncertainty_samples: 5
+precomputed:
+  enable: true
+  generation: true
+  verification: true
+  uncertainty: true
+  path: /home/azureuser/caf83/helm/results/rebuttals/qwen/run_20250327_232915_experiment_3__medqa_1_7_qwen/results_experiment_3__medqa_1_7_qwen.csv
+dataset:
+  name: HuggingSara/medqa
+  subset: null
+  split: validation
+  num_samples: -1
+device: cuda:3
+name_postfix: experiment_3__medqa_1_7_qwen
+
