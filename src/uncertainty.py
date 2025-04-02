@@ -299,3 +299,99 @@ def surrogate_token_uncertainties(
     p_yes_distribution = p_yes_distribution.mean(dim=1)
     entropy = -(p_yes_distribution * torch.log(p_yes_distribution + 1e-9))
     return entropy
+
+
+
+def coannotating_uncertainty_entropy(
+    model,
+    tokenizer,
+    prompts,
+    generated_responses,
+    n=5,  # Number of repetitions for each prompt
+    device="cuda",
+    yes_token="YES",
+    no_token="NO",
+    max_length=512,
+    normalize_by_length=None,
+):
+    """
+    Computes the distribution of p(YES) for each question, repeated n times in a batch.
+
+    Args:
+        model: The LLM to evaluate.
+        tokenizer: The tokenizer for the model.
+        prompts: A list of questions (strings).
+        generated_responses: A list of generated responses (strings).
+        n: Number of times to repeat each question in the batch.
+        device: Device to run the model on (e.g., "cuda").
+        yes_token: The token representing "YES".
+        no_token: The token representing "NO".
+        max_length: Maximum sequence length for tokenization.
+        normalize_by_length: Optional; if provided, normalize probabilities by length.
+
+    Returns:
+        torch.Tensor of shape [batch_size, n] containing p(YES) values for each repetition.
+    """
+    batch_size = len(prompts)
+
+    # Build verification prompts for each item
+    verify_prompts = []
+    for question, candidate_answer in zip(prompts, generated_responses):
+        text = (
+            "Given the following question and the model's answer, please evaluate correctness.\n"
+            f"Respond with a single token: {yes_token} or {no_token}\n\n"
+            f"Question: {question}\n\n"
+            f"Model Answer: {candidate_answer}\n\n"
+            f"Please give a confidence score on a scale of 0.0 to 1.0 for this prediction.\n\n"
+            "Answer: "
+        )
+        verify_prompts.extend([text] * n)  # Repeat each question n times
+
+    # Tokenize all in a batch
+    inputs = tokenizer(
+        verify_prompts,
+        return_tensors="pt",
+        padding="max_length",
+        truncation=True,
+        max_length=max_length,
+    ).to(device)
+
+    # Generate outputs
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=4,
+            temperature=0.7,
+            return_dict_in_generate=True,
+            pad_token_id=tokenizer.pad_token_id,
+        )
+    
+    # Process generated outputs
+    generated_texts = tokenizer.batch_decode(outputs.sequences[:, inputs.input_ids.shape[1]:], skip_special_tokens=True)
+    
+    # Parse the confidence scores
+    confidence_scores = []
+    for text in generated_texts:
+        import re
+        
+        # Try to extract a float using regex
+        match = re.search(r'(\d+\.\d+|\d+)', text.strip())
+        if match:
+            # Convert the matched string to float
+            score = float(match.group(1))
+            # Ensure the score is between 0 and 1
+            score = max(0.0, min(1.0, score))
+            confidence_scores.append(score)
+        else:
+            # If no float is found, default to NaN
+            confidence_scores.append(torch.nan)
+    
+    # Convert to tensor and reshape
+    confidence_tensor = torch.tensor(confidence_scores, device=device).view(batch_size, n)
+    
+    # Calculate mean confidence, ignoring NaN values
+    mean_confidence = torch.nanmean(confidence_tensor, dim=1)
+    
+    # Calculate binary entropy
+    entropy = -(confidence_tensor * torch.log(confidence_tensor + 1e-9)).sum(dim=1)
+    return entropy

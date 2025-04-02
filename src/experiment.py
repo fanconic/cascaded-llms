@@ -237,12 +237,70 @@ class Experiment:
         }
 
     def _analyze_and_save_results(self, results: Dict):
+        # Create DataFrame from results
         data = pd.DataFrame(self._create_dataframe_dict(results))
+        
+        # # Calibrate confidence scores using a small subset of the data
+        # calibration_size = min(200, len(data))  # Use at most 100 samples for calibration
+        # calibration_subset = data.sample(n=calibration_size, random_state=42)
+        
+        # # Calibrate base model probabilities
+        # base_calibration = self._calibrate_confidence_scores(
+        #     calibration_subset["base_prob"].values,
+        #     (calibration_subset["base_prediction"] == calibration_subset["label"]).values
+        # )
+        
+        # # Calibrate large model probabilities
+        # large_calibration = self._calibrate_confidence_scores(
+        #     calibration_subset["large_prob"].values,
+        #     (calibration_subset["large_prediction"] == calibration_subset["label"]).values
+        # )
+        
+        # # Apply calibration to the full dataset
+        # data["base_prob"] = self._apply_calibration(data["base_prob"].values, base_calibration)
+        # data["large_prob"] = self._apply_calibration(data["large_prob"].values, large_calibration)
+        
+        # data["acceptance_ratios"] = data["large_prob"] / (data["base_prob"] * data["M"])
+        # data["decision"] = data.apply(lambda x: 0 if x["acceptance_ratios"] > x["u"] else 1, axis=1)
+        # data["cost"] = data.apply(lambda x: self.cfg.costs.base_gen_cost + self.cfg.costs.large_inf_cost if x["acceptance_ratios"] > x["u"] else self.cfg.costs.base_gen_cost + self.cfg.costs.large_inf_cost + self.cfg.costs.large_gen_cost, axis=1)
+        
         self._calculate_and_plot_metrics(data)
         data.to_csv(
             os.path.join(self.run_dir, f"results_{self.cfg.name_postfix}.csv"),
             index=False,
         )
+    
+    def _calibrate_confidence_scores(self, confidence_scores, correctness):
+        """
+        Calibrate confidence scores using isotonic regression.
+        
+        Args:
+            confidence_scores: Array of model confidence scores
+            correctness: Binary array indicating whether predictions were correct
+            
+        Returns:
+            Fitted sklearn.isotonic.IsotonicRegression model
+        """
+        from sklearn.isotonic import IsotonicRegression
+        
+        # Initialize and fit isotonic regression model
+        ir = IsotonicRegression(out_of_bounds='clip')
+        ir.fit(confidence_scores, correctness)
+        
+        return ir
+    
+    def _apply_calibration(self, confidence_scores, calibration_model):
+        """
+        Apply calibration model to confidence scores.
+        
+        Args:
+            confidence_scores: Array of model confidence scores
+            calibration_model: Fitted calibration model
+            
+        Returns:
+            Array of calibrated confidence scores
+        """
+        return calibration_model.predict(confidence_scores)
 
     def _calculate_and_plot_metrics(self, data: pd.DataFrame) -> None:
         """Calculate accuracy metrics and generate plots."""

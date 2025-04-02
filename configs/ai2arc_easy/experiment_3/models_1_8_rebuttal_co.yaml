@@ -7,9 +7,9 @@ costs:
   large_gen_cost: 10.0
   expert_cost: 12.45 # Adjusted to fir system risk
   mistake_cost: 35.71 # Adjusted to fir system risk
-base_model: meta-llama/Llama-3.2-1B-Instruct
-large_model: meta-llama/Llama-3.1-8B-Instruct
-batch_size: 3 #60
+base_model: Qwen/Qwen2.5-1.5B-Instruct
+large_model: Qwen/Qwen2.5-7B-Instruct
+batch_size: 7 #60
 max_input_length: 512
 online:
   enable: false
@@ -27,19 +27,19 @@ sft:
   lora_alpha: 64
   lora_dropout: 0.1
 verification_fn: surrogate_token_probs
-uncertainty_fn: surrogate_token_uncertainties
-uncertainty_samples: 12
+uncertainty_fn: coannotating_uncertainty_entropy
+uncertainty_samples: 5
 precomputed:
-  # enable: true
-  # generation: true
-  # verification: true
-  # uncertainty: true
-  # path: /home/azureuser/caf83/helm/results/20250123/arc2easy/run_20250123_125432_ai2arc_easy_models_1_8/results_ai2arc_easy_models_1_8.csv
-  enable: false
-  generation: false
-  verification: false
+  enable: true
+  generation: true
+  verification: true
   uncertainty: false
-  path: /home/
+  path: /home/azureuser/caf83/helm/results/rebuttals/qwen/run_20250327_232200_experiment_3__arc2easy_1_7_qwen/results_experiment_3__arc2easy_1_7_qwen.csv
+  # enable: false
+  # generation: false
+  # verification: false
+  # uncertainty: false
+  # path: /home/
 dataset:
   name: allenai/ai2_arc
   subset: ARC-Easy
