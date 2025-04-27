@@ -298,14 +298,14 @@ def surrogate_token_uncertainties(
     # Reshape to [batch_size, n]
     p_yes_distribution = p_yes_normalized.view(batch_size, n)
     p_yes_distribution = p_yes_distribution.mean(dim=1)
-    # entropy = -(p_yes_distribution * torch.log(p_yes_distribution + 1e-9))
+    entropy = -(p_yes_distribution * torch.log(p_yes_distribution + 1e-9))
 
     # Calculate verification costs based on token counts
     input_token_counts = [
         len(tokenizer.encode(verify_prompts[i])) * n
         for i in range(0, len(verify_prompts), n)
     ]
-    output_token_counts = [0] * len(verify_prompts)  # No generation, only inference
+    output_token_counts = [0] * int(len(verify_prompts)/n)  # No generation, only inference
 
     # Extract model name from the model path or object
     model_name = getattr(
@@ -315,17 +315,18 @@ def surrogate_token_uncertainties(
     )
 
     # Calculate costs using the utility function
+    # Calculate costs using the utility function
     uncertainty_costs = [
         calculate_costs(
             model_name=model_name,
             input_token_length=input_count,
-            output_token_length=output_token_counts,
+            output_token_length=output_count,
             output_input_price_ratio=1.0,  # irrelevant, because of no generation
         )
-        for input_count in input_token_counts
+        for input_count, output_count in zip(input_token_counts, output_token_counts)
     ]
 
-    return p_yes_distribution, uncertainty_costs
+    return entropy, uncertainty_costs
 
 
 def coannotating_uncertainty_entropy(

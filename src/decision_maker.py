@@ -168,10 +168,11 @@ class AIDecisionSystem:
         costs = [
             calculate_costs(
                 model.name_or_path,
-                input_token_counts,
-                output_token_counts,
+                input_token_count,
+                output_token_count,
                 self.costs.output_input_price_ratio,
             )
+            for (input_token_count, output_token_count) in zip(input_token_counts, output_token_counts)
         ]
         generated_output = [
             tokenizer.decode(output, skip_special_tokens=True)[len(prompt) :]
@@ -355,6 +356,12 @@ class AIDecisionSystem:
                     decision["base_prediction"],
                     decision["large_prediction"],
                     label,
+                    base_gen_cost=decision["base_gen_cost"],
+                    large_gen_cost=decision["large_gen_cost"],
+                    base_inf_cost=decision["base_inf_cost"],
+                    large_inf_cost=decision["large_inf_cost"],
+                    base_uncert_cost=decision["base_uncert_cost"],
+                    large_uncert_cost=decision["large_uncert_cost"],
                 ).to(self.config.device)
 
                 total_loss += system_risk

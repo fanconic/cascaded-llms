@@ -187,10 +187,10 @@ def surrogate_token_probs(
         calculate_costs(
             model_name=model_name,
             input_token_length=input_count,
-            output_token_length=output_token_counts,
+            output_token_length=output_count,
             output_input_price_ratio=1.0,  # irrelevant, because of no generation
         )
-        for input_count in input_token_counts
+        for input_count, output_count in zip(input_token_counts, output_token_counts)
     ]
 
     return torch.Tensor(probs_list), verification_costs
