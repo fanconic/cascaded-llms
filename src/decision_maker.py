@@ -18,8 +18,7 @@ from transformers import (
     PreTrainedTokenizer,
 )
 from src.config import ModelConfig, CostConfig, OnlineConfig
-from src.utils import extract_predictions
-from scipy.optimize import minimize, differential_evolution
+from src.utils import extract_predictions, calculate_costs
 import numpy as np
 
 
@@ -51,6 +50,8 @@ class AIDecisionSystem:
         cost_config: CostConfig,
         online_config: OnlineConfig,
     ):
+        self.base_model_path = base_model_path
+        self.large_model_path = large_model_path
         self.config = model_config
         self.costs = cost_config
         self.online_config = online_config
@@ -157,10 +158,27 @@ class AIDecisionSystem:
                 top_p=0.9,
             )
 
-        return [
+        # Calculate generation costs based on token counts
+        input_token_counts = [len(tokenizer.encode(prompt)) for prompt in prompts]
+        output_token_counts = [
+            len(output) - input_count
+            for output, input_count in zip(outputs, input_token_counts)
+        ]
+
+        costs = [
+            calculate_costs(
+                model.name_or_path,
+                input_token_counts,
+                output_token_counts,
+                self.costs.output_input_price_ratio,
+            )
+        ]
+        generated_output = [
             tokenizer.decode(output, skip_special_tokens=True)[len(prompt) :]
             for output, prompt in zip(outputs, prompts)
         ]
+
+        return generated_output, costs
 
     def _evaluate_models(
         self,
@@ -173,7 +191,7 @@ class AIDecisionSystem:
         """Evaluate model outputs and compute probabilities and uncertainties."""
 
         if not self.config.precomputed.verification:
-            base_probs = self.verification_fn(
+            base_probs, base_inf_costs = self.verification_fn(
                 model=self.base_model,
                 tokenizer=self.base_tokenizer,
                 prompts=prompts,
@@ -184,7 +202,7 @@ class AIDecisionSystem:
                 prompt_template=self.config.prompt_template,
             )
 
-            large_probs_for_base = self.verification_fn(
+            large_probs_for_base, large_inf_costs = self.verification_fn(
                 model=self.large_model,
                 tokenizer=self.large_tokenizer,
                 prompts=prompts,
@@ -199,7 +217,7 @@ class AIDecisionSystem:
             large_probs_for_base = torch.Tensor(precomputed_batch["large_prob"].values)
 
         if not self.config.precomputed.uncertainty:
-            base_uncertainties = self.uncertainty_fn(
+            base_uncertainties, base_uncert_costs = self.uncertainty_fn(
                 model=self.base_model,
                 tokenizer=self.base_tokenizer,
                 prompts=questions,
@@ -210,7 +228,7 @@ class AIDecisionSystem:
                 n=self.config.uncertainty_samples,
             )
 
-            large_uncertainties = self.uncertainty_fn(
+            large_uncertainties, large_uncert_costs = self.uncertainty_fn(
                 model=self.large_model,
                 tokenizer=self.large_tokenizer,
                 prompts=questions,
@@ -227,7 +245,16 @@ class AIDecisionSystem:
             large_uncertainties = torch.Tensor(
                 precomputed_batch["large_uncertainty"].values
             )
-        return base_probs, large_probs_for_base, base_uncertainties, large_uncertainties
+        return (
+            base_probs,
+            large_probs_for_base,
+            base_uncertainties,
+            large_uncertainties,
+            base_inf_costs,
+            large_inf_costs,
+            base_uncert_costs,
+            large_uncert_costs,
+        )
 
     def _make_decision(
         self,
@@ -237,6 +264,12 @@ class AIDecisionSystem:
         base_response: str,
         large_response: str,
         expert_response: str,
+        base_inf_cost: float,
+        large_inf_cost: float,
+        base_gen_cost: float,
+        large_gen_cost: float,
+        base_uncert_cost: float,
+        large_uncert_cost: float,
     ) -> Tuple[int, str, float]:
         """Make a decision for a single prompt."""
         u = random.random()
@@ -245,8 +278,9 @@ class AIDecisionSystem:
                 return (
                     2,
                     f"Expert Reponse: The best answer is {expert_response}",
-                    self.costs.base_gen_cost
-                    + self.costs.large_inf_cost
+                    base_gen_cost
+                    + large_inf_cost
+                    + large_uncert_cost
                     + self.costs.expert_cost,
                     base_uncert,
                     u,
@@ -254,7 +288,7 @@ class AIDecisionSystem:
             return (
                 0,
                 base_response,
-                self.costs.base_gen_cost + self.costs.large_inf_cost,
+                base_gen_cost + large_inf_cost + large_uncert_cost,
                 base_uncert,
                 u,
             )
@@ -263,9 +297,10 @@ class AIDecisionSystem:
                 return (
                     2,
                     f"Expert Reponse: The best answer is {expert_response}",
-                    self.costs.base_gen_cost
-                    + self.costs.large_inf_cost
-                    + self.costs.large_gen_cost
+                    base_gen_cost
+                    + large_inf_cost
+                    + large_gen_cost
+                    + large_uncert_cost
                     + self.costs.expert_cost,
                     large_uncert,
                     u,
@@ -273,9 +308,7 @@ class AIDecisionSystem:
             return (
                 1,
                 large_response,
-                self.costs.base_gen_cost
-                + self.costs.large_inf_cost
-                + self.costs.large_gen_cost,
+                base_gen_cost + large_inf_cost + large_gen_cost + large_uncert_cost,
                 large_uncert,
                 u,
             )
@@ -346,6 +379,12 @@ class AIDecisionSystem:
         base_predictions,
         large_predictions,
         expert_responses,
+        base_gen_cost,
+        large_gen_cost,
+        base_inf_cost,
+        large_inf_cost,
+        base_uncert_cost,
+        large_uncert_cost,
     ):
         # Calculate the system risk in this step
         # MvM
@@ -376,21 +415,16 @@ class AIDecisionSystem:
         l_y_large = self.costs.mistake_cost * (large_predictions != expert_responses)
 
         # Cumulative sums per distinct action
-        c_0 = self.costs.base_gen_cost + self.costs.large_inf_cost
-        c_1 = (
-            self.costs.base_gen_cost
-            + self.costs.large_inf_cost
-            + self.costs.large_gen_cost
-        )
+        c_0 = base_gen_cost + large_inf_cost + large_uncert_cost
+        c_1 = base_gen_cost + large_inf_cost + large_gen_cost + large_uncert_cost
         c_2 = (
-            self.costs.base_gen_cost
-            + self.costs.large_inf_cost
-            + self.costs.expert_cost
+            base_gen_cost + large_inf_cost + large_uncert_cost + self.costs.expert_cost
         )
         c_3 = (
-            self.costs.base_gen_cost
-            + self.costs.large_inf_cost
-            + self.costs.large_gen_cost
+            base_gen_cost
+            + large_inf_cost
+            + large_gen_cost
+            + large_uncert_cost
             + self.costs.expert_cost
         )
 
@@ -437,10 +471,10 @@ class AIDecisionSystem:
         """Process a batch of prompts and make decisions with optional online learning."""
 
         if not self.config.precomputed.generation:
-            base_outputs = self.generate_response(
+            base_outputs, base_gen_costs = self.generate_response(
                 self.base_model, self.base_tokenizer, prompts
             )
-            large_outputs = self.generate_response(
+            large_outputs, large_gen_costs = self.generate_response(
                 self.large_model, self.large_tokenizer, prompts
             )
 
@@ -464,14 +498,19 @@ class AIDecisionSystem:
             large_probs_for_base,
             base_uncertainties,
             large_uncertainties,
+            base_inf_costs,
+            large_inf_costs,
+            base_uncert_costs,
+            large_uncert_costs,
         ) = self._evaluate_models(
             prompts, questions, base_predictions, large_predictions, precomputed_batch
         )
 
-        ratio = large_probs_for_base.to(self.config.device) / (
-            base_probs.to(self.config.device) * F.softplus(self.M)
-        )
-        acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)
+        # ratio = large_probs_for_base.to(self.config.device) / (
+        #     base_probs.to(self.config.device) * F.softplus(self.M)
+        # )
+        # acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)
+        acceptance_prob = large_probs_for_base.to(self.config.device)
 
         decisions = []
 
@@ -480,12 +519,18 @@ class AIDecisionSystem:
             large_response = large_outputs[i].strip()
 
             decision, final_answer, cost, uncertainty, u = self._make_decision(
-                acceptance_prob[i].item(),
-                base_uncertainties[i].item(),
-                large_uncertainties[i].item(),
-                base_response,
-                large_response,
-                expert_responses[i],
+                acceptance_prob=acceptance_prob[i].item(),
+                base_uncert=base_uncertainties[i].item(),
+                large_uncert=large_uncertainties[i].item(),
+                base_response=base_response,
+                large_response=large_response,
+                expert_response=expert_responses[i],
+                base_gen_cost=base_gen_costs[i],
+                large_gen_cost=large_gen_costs[i],
+                base_inf_cost=base_inf_costs[i],
+                large_inf_cost=large_inf_costs[i],
+                base_uncert_cost=base_uncert_costs[i],
+                large_uncert_cost=large_uncert_costs[i],
             )
 
             system_risk = self._calculate_system_risk(
@@ -499,6 +544,12 @@ class AIDecisionSystem:
                 base_predictions[i],
                 large_predictions[i],
                 expert_responses[i],
+                base_gen_cost=base_gen_costs[i],
+                large_gen_cost=large_gen_costs[i],
+                base_inf_cost=base_inf_costs[i],
+                large_inf_cost=large_inf_costs[i],
+                base_uncert_cost=base_uncert_costs[i],
+                large_uncert_cost=large_uncert_costs[i],
             )
 
             system_risk_static = self._calculate_system_risk(
@@ -512,6 +563,12 @@ class AIDecisionSystem:
                 base_predictions[i],
                 large_predictions[i],
                 expert_responses[i],
+                base_gen_cost=base_gen_costs[i],
+                large_gen_cost=large_gen_costs[i],
+                base_inf_cost=base_inf_costs[i],
+                large_inf_cost=large_inf_costs[i],
+                base_uncert_cost=base_uncert_costs[i],
+                large_uncert_cost=large_uncert_costs[i],
             )
 
             # 01 loss
@@ -523,8 +580,8 @@ class AIDecisionSystem:
             )
 
             # Other system risk strategies
-            system_risk_base = l_y_base + self.costs.base_gen_cost
-            system_risk_large = l_y_large + self.costs.large_gen_cost
+            system_risk_base = l_y_base + base_gen_costs[i]
+            system_risk_large = l_y_large + large_gen_costs[i]
             system_risk_expert = self.costs.expert_cost
 
             decisions.append(
@@ -554,6 +611,12 @@ class AIDecisionSystem:
                     "system_risk_expert": system_risk_expert,
                     "system_risk_static": system_risk_static.item(),
                     "label": expert_responses[i],
+                    "base_gen_cost": base_gen_costs[i],
+                    "large_gen_cost": large_gen_costs[i],
+                    "base_inf_cost": base_inf_costs[i],
+                    "large_inf_cost": large_inf_costs[i],
+                    "base_uncert_cost": base_uncert_costs[i],
+                    "large_uncert_cost": large_uncert_costs[i],
                 }
             )
 

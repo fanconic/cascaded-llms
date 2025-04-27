@@ -4,9 +4,9 @@ from src.uncertainty import (
     per_token_entropy,
     verdict_distribution_entropy,
     surrogate_token_uncertainties,
-    coannotating_uncertainty_entropy
+    coannotating_uncertainty_entropy,
 )
-from src.verification import verbalisation, sequence_probability, surrogate_token_probs 
+from src.verification import verbalisation, sequence_probability, surrogate_token_probs
 
 VERIFICATION_FN_MAPPING = {
     "surrogate_token_probs": surrogate_token_probs,
@@ -44,6 +44,7 @@ class CostConfig:
     large_inf_cost: float
     expert_cost: float
     mistake_cost: float
+    output_input_price_ratio: float
 
 
 @dataclass

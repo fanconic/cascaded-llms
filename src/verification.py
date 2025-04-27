@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from src.utils import calculate_costs
 
 
 def verbalisation(
@@ -170,7 +171,29 @@ def surrogate_token_probs(
 
         probs_list.append(p_yes_normalized)
 
-    return torch.Tensor(probs_list)
+    # Calculate verification costs based on token counts
+    input_token_counts = [len(tokenizer.encode(prompt)) for prompt in verify_prompts]
+    output_token_counts = [0] * len(verify_prompts)  # No generation, only inference
+
+    # Extract model name from the model path or object
+    model_name = getattr(
+        model,
+        "name_or_path",
+        str(model).split("/")[-1] if "/" in str(model) else str(model),
+    )
+
+    # Calculate costs using the utility function
+    verification_costs = [
+        calculate_costs(
+            model_name=model_name,
+            input_token_length=input_count,
+            output_token_length=output_token_counts,
+            output_input_price_ratio=1.0,  # irrelevant, because of no generation
+        )
+        for input_count in input_token_counts
+    ]
+
+    return torch.Tensor(probs_list), verification_costs
 
 
 def sequence_probability(

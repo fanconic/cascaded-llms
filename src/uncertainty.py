@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from src.utils import calculate_costs
 
 
 def per_token_entropy(
@@ -297,9 +298,34 @@ def surrogate_token_uncertainties(
     # Reshape to [batch_size, n]
     p_yes_distribution = p_yes_normalized.view(batch_size, n)
     p_yes_distribution = p_yes_distribution.mean(dim=1)
-    entropy = -(p_yes_distribution * torch.log(p_yes_distribution + 1e-9))
-    return entropy
+    # entropy = -(p_yes_distribution * torch.log(p_yes_distribution + 1e-9))
 
+    # Calculate verification costs based on token counts
+    input_token_counts = [
+        len(tokenizer.encode(verify_prompts[i])) * n
+        for i in range(0, len(verify_prompts), n)
+    ]
+    output_token_counts = [0] * len(verify_prompts)  # No generation, only inference
+
+    # Extract model name from the model path or object
+    model_name = getattr(
+        model,
+        "name_or_path",
+        str(model).split("/")[-1] if "/" in str(model) else str(model),
+    )
+
+    # Calculate costs using the utility function
+    uncertainty_costs = [
+        calculate_costs(
+            model_name=model_name,
+            input_token_length=input_count,
+            output_token_length=output_token_counts,
+            output_input_price_ratio=1.0,  # irrelevant, because of no generation
+        )
+        for input_count in input_token_counts
+    ]
+
+    return p_yes_distribution, uncertainty_costs
 
 
 def coannotating_uncertainty_entropy(
@@ -365,17 +391,19 @@ def coannotating_uncertainty_entropy(
             return_dict_in_generate=True,
             pad_token_id=tokenizer.pad_token_id,
         )
-    
+
     # Process generated outputs
-    generated_texts = tokenizer.batch_decode(outputs.sequences[:, inputs.input_ids.shape[1]:], skip_special_tokens=True)
-    
+    generated_texts = tokenizer.batch_decode(
+        outputs.sequences[:, inputs.input_ids.shape[1] :], skip_special_tokens=True
+    )
+
     # Parse the confidence scores
     confidence_scores = []
     for text in generated_texts:
         import re
-        
+
         # Try to extract a float using regex
-        match = re.search(r'(\d+\.\d+|\d+)', text.strip())
+        match = re.search(r"(\d+\.\d+|\d+)", text.strip())
         if match:
             # Convert the matched string to float
             score = float(match.group(1))
@@ -385,13 +413,15 @@ def coannotating_uncertainty_entropy(
         else:
             # If no float is found, default to NaN
             confidence_scores.append(torch.nan)
-    
+
     # Convert to tensor and reshape
-    confidence_tensor = torch.tensor(confidence_scores, device=device).view(batch_size, n)
-    
+    confidence_tensor = torch.tensor(confidence_scores, device=device).view(
+        batch_size, n
+    )
+
     # Calculate mean confidence, ignoring NaN values
     mean_confidence = torch.nanmean(confidence_tensor, dim=1)
-    
+
     # Calculate binary entropy
     entropy = -(confidence_tensor * torch.log(confidence_tensor + 1e-9)).sum(dim=1)
     return entropy
