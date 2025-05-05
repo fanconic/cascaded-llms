@@ -196,11 +196,11 @@ class AIDecisionSystem:
                 model=self.base_model,
                 tokenizer=self.base_tokenizer,
                 prompts=prompts,
-                questions=questions,
                 generated_responses=base_answer,
-                device=self.config.device,
-                normalize_by_length=True,
-                prompt_template=self.config.prompt_template,
+                questions=questions,
+                output_input_price_ratio=self.costs.output_input_price_ratio,
+                n=self.config.uncertainty_samples,
+                mc_dropout=self.config.uncertainty_samples > 1
             )
 
             large_probs_for_base, large_inf_costs = self.verification_fn(
@@ -209,43 +209,49 @@ class AIDecisionSystem:
                 prompts=prompts,
                 questions=questions,
                 generated_responses=base_answer,
-                device=self.config.device,
-                normalize_by_length=True,
-                prompt_template=self.config.prompt_template,
+                output_input_price_ratio=self.costs.output_input_price_ratio,
+                n=self.config.uncertainty_samples,
+                mc_dropout=self.config.uncertainty_samples > 1
             )
         else:
             base_probs = torch.Tensor(precomputed_batch["base_prob"].values)
             large_probs_for_base = torch.Tensor(precomputed_batch["large_prob"].values)
+            base_inf_costs =precomputed_batch["base_inf_cost"].tolist()
+            large_inf_costs =precomputed_batch["base_inf_cost"].tolist()
 
         if not self.config.precomputed.uncertainty:
-            base_uncertainties, base_uncert_costs = self.uncertainty_fn(
+            base_uncertainties, base_uncert_costs = self.verification_fn(
                 model=self.base_model,
                 tokenizer=self.base_tokenizer,
-                prompts=questions,
+                prompts=prompts,
+                questions=questions,
                 generated_responses=base_answer,
-                device=self.config.device,
-                normalize_by_length=True,
-                max_length=self.config.max_input_length,
+                output_input_price_ratio=self.costs.output_input_price_ratio,
                 n=self.config.uncertainty_samples,
+                mc_dropout=self.config.uncertainty_samples > 1
             )
 
-            large_uncertainties, large_uncert_costs = self.uncertainty_fn(
+            large_uncertainties, large_uncert_costs = self.verification_fn(
                 model=self.large_model,
                 tokenizer=self.large_tokenizer,
-                prompts=questions,
+                prompts=prompts,
+                questions=questions,
                 generated_responses=large_answer,
-                device=self.config.device,
-                normalize_by_length=True,
-                max_length=self.config.max_input_length,
+                output_input_price_ratio=self.costs.output_input_price_ratio,
                 n=self.config.uncertainty_samples,
+                mc_dropout=self.config.uncertainty_samples > 1
             )
+            
         else:
             base_uncertainties = torch.Tensor(
                 precomputed_batch["base_uncertainty"].values
             )
+            base_uncert_costs =precomputed_batch["base_uncert_cost"].tolist()
             large_uncertainties = torch.Tensor(
                 precomputed_batch["large_uncertainty"].values
             )
+            large_uncert_costs = precomputed_batch["large_uncert_cost"].tolist()
+            
         return (
             base_probs,
             large_probs_for_base,
@@ -259,7 +265,8 @@ class AIDecisionSystem:
 
     def _make_decision(
         self,
-        acceptance_prob: float,
+        base_prob: float,
+        large_prob: float,
         base_uncert: float,
         large_uncert: float,
         base_response: str,
@@ -271,17 +278,26 @@ class AIDecisionSystem:
         large_gen_cost: float,
         base_uncert_cost: float,
         large_uncert_cost: float,
+        use_larger_model: bool = True
     ) -> Tuple[int, str, float]:
         """Make a decision for a single prompt."""
+        
+        if use_larger_model:
+            acceptance_probability =large_prob
+            first_inf_cost = large_inf_cost
+        else:
+            acceptance_probability = base_prob
+            first_inf_cost = base_inf_cost
+            
         u = random.random()
-        if u < acceptance_prob:
+        if u < acceptance_probability:
             if base_uncert > F.softplus(self.tau_base):
                 return (
                     2,
                     f"Expert Reponse: The best answer is {expert_response}",
                     base_gen_cost
-                    + large_inf_cost
-                    + large_uncert_cost
+                    + first_inf_cost
+                    #+ large_uncert_cost
                     + self.costs.expert_cost,
                     base_uncert,
                     u,
@@ -289,7 +305,8 @@ class AIDecisionSystem:
             return (
                 0,
                 base_response,
-                base_gen_cost + large_inf_cost + large_uncert_cost,
+                base_gen_cost 
+                + first_inf_cost,
                 base_uncert,
                 u,
             )
@@ -309,7 +326,10 @@ class AIDecisionSystem:
             return (
                 1,
                 large_response,
-                base_gen_cost + large_inf_cost + large_gen_cost + large_uncert_cost,
+                base_gen_cost 
+                + first_inf_cost 
+                + large_gen_cost,
+                #+ large_uncert_cost,
                 large_uncert,
                 u,
             )
@@ -494,7 +514,9 @@ class AIDecisionSystem:
 
         else:
             base_outputs = precomputed_batch["base_response"].astype(str).tolist()
+            base_gen_costs = precomputed_batch["base_gen_cost"].tolist()
             large_outputs = precomputed_batch["large_response"].astype(str).tolist()
+            large_gen_costs = precomputed_batch["large_gen_cost"].tolist()
             base_predictions = precomputed_batch["base_prediction"].astype(str).tolist()
             large_predictions = (
                 precomputed_batch["large_prediction"].astype(str).tolist()
@@ -526,7 +548,8 @@ class AIDecisionSystem:
             large_response = large_outputs[i].strip()
 
             decision, final_answer, cost, uncertainty, u = self._make_decision(
-                acceptance_prob=acceptance_prob[i].item(),
+                base_prob=base_probs[i].item(),
+                large_prob=large_probs_for_base[i].item(),
                 base_uncert=base_uncertainties[i].item(),
                 large_uncert=large_uncertainties[i].item(),
                 base_response=base_response,

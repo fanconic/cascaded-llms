@@ -43,6 +43,27 @@ def calculate_costs(
     return input_cost + output_cost
 
 
+def patch_dropout(model, p):
+    """
+    Updates the attention dropout value for all layers in the given LLaMA model.
+
+    Args:
+        model (torch.nn.Module): The LLaMA model to update.
+        p (float): The new dropout probability. Must be in the range [0, 1).
+
+    Returns:
+        None
+    """
+    if not (0 <= p < 1):
+        raise ValueError("Dropout probability p must be in the range [0, 1).")
+
+    # Iterate over all layers in the model
+    for i, layer in enumerate(model.model.layers):
+        if hasattr(layer.self_attn, "attention_dropout"):
+            layer.self_attn.attention_dropout = p
+
+
+
 def extract_predictions(response: str) -> str:
     """Extract the single prediction from the response text.
 
@@ -178,7 +199,7 @@ def plot_accuracy_vs_cost_D1(
         dynamic_cost / data_length,
         dynamic_accuracy,
         yerr=dynamic_accuracy_err,
-        label=r"$\phi_{\text{MvM}}$",
+        label=r"$\phi_{\text{m2m}}$",
         fmt="x",
         capsize=5,
     )

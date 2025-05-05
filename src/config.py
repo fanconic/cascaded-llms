@@ -1,26 +1,11 @@
 from dataclasses import dataclass
 from typing import Dict
-from src.uncertainty import (
-    per_token_entropy,
-    verdict_distribution_entropy,
-    surrogate_token_uncertainties,
-    coannotating_uncertainty_entropy,
-)
-from src.verification import verbalisation, sequence_probability, surrogate_token_probs
+from src.verification import self_verification, surrogate_token_probs
 
 VERIFICATION_FN_MAPPING = {
     "surrogate_token_probs": surrogate_token_probs,
-    "sequence_probability": sequence_probability,
-    "verbalisation": verbalisation,
+    "self_verification": self_verification,
 }
-
-UNCERTAINTY_FN_MAPPING = {
-    "per_token_entropy": per_token_entropy,
-    "verdict_distribution_entropy": verdict_distribution_entropy,
-    "surrogate_token_uncertainties": surrogate_token_uncertainties,
-    "coannotating_uncertainty_entropy": coannotating_uncertainty_entropy,
-}
-
 
 @dataclass
 class ModelConfig:
@@ -64,7 +49,7 @@ class ExperimentConfig:
 
     def __post_init__(self):
         self.verification_fn = VERIFICATION_FN_MAPPING[self.verification_fn]
-        self.uncertainty_fn = UNCERTAINTY_FN_MAPPING[self.uncertainty_fn]
+        self.uncertainty_fn = VERIFICATION_FN_MAPPING[self.uncertainty_fn]
 
 
 @dataclass

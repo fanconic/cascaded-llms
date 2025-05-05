@@ -1,6 +1,6 @@
 import torch
 import torch.nn.functional as F
-from src.utils import calculate_costs
+from src.utils import calculate_costs, patch_dropout
 
 
 def per_token_entropy(
@@ -179,24 +179,6 @@ def verdict_distribution_entropy(
     return verdict_entropy
 
 
-def patch_dropout(model, p):
-    """
-    Updates the attention dropout value for all layers in the given LLaMA model.
-
-    Args:
-        model (torch.nn.Module): The LLaMA model to update.
-        p (float): The new dropout probability. Must be in the range [0, 1).
-
-    Returns:
-        None
-    """
-    if not (0 <= p < 1):
-        raise ValueError("Dropout probability p must be in the range [0, 1).")
-
-    # Iterate over all layers in the model
-    for i, layer in enumerate(model.model.layers):
-        if hasattr(layer.self_attn, "attention_dropout"):
-            layer.self_attn.attention_dropout = p
 
 
 def surrogate_token_uncertainties(

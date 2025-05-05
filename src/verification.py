@@ -1,88 +1,6 @@
 import torch
 import torch.nn.functional as F
-from src.utils import calculate_costs
-
-
-def verbalisation(
-    model,
-    tokenizer,
-    prompts,
-    generated_responses,
-    questions,
-    device="cuda",
-    yes_token="YES",
-    no_token="NO",
-    max_length=512,
-    max_new_tokens=2,
-    normalize_by_length=None,
-    prompt_template="",
-):
-    """
-    Batched version of the verbalisation approach.
-    For each prompt+generated_response pair, we construct a short "verification prompt"
-    that instructs the model to respond with a single token: yes_token or no_token.
-
-    Then, we generate up to `max_new_tokens` tokens (often 1-2 tokens is enough).
-    We parse the resulting text to see if it starts with yes_token or no_token.
-
-    Returns: A list of floats [batch_size],
-       where each entry is:
-         1.0 if we detect `yes_token`,
-         0.0 if we detect `no_token`,
-         None if neither is found (you can handle that as you wish).
-    """
-    batch_size = len(prompts)
-    # Build all verification prompts
-    verify_prompts = []
-    for question, candidate_answer in zip(prompts, generated_responses):
-        text = (
-            "Given the following medical question and the model's answer, please evaluate correctness.\n"
-            f"Respond with a single token: {yes_token} or {no_token}\n"
-            f"Question:\n{question}\n\n"
-            f"model answer:\n{candidate_answer}\n\n"
-            f"Is this answer correct: {yes_token} or {no_token}?\n"
-            "Answer: "
-        )
-        verify_prompts.append(text)
-
-    # Tokenize all prompts in one batch
-    inputs = tokenizer(
-        verify_prompts,
-        return_tensors="pt",
-        padding="max_length",
-        truncation=True,
-        max_length=max_length,
-    ).to(model.device)
-
-    # Generate for each prompt
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=max_new_tokens,
-            pad_token_id=tokenizer.pad_token_id,
-        )
-
-    # Decode each model output
-    decoded_outputs = [
-        tokenizer.decode(output_seq, skip_special_tokens=True) for output_seq in outputs
-    ]
-
-    # Now parse each decoded text to see if it starts with "YES" or "NO"
-    results = []
-    for i, raw_text in enumerate(decoded_outputs):
-        # The original prompt is verify_prompts[i]
-        # We only want to see what's generated *after* the prompt
-        prompt_len = len(verify_prompts[i])
-        verification_text = raw_text[prompt_len:].strip().upper()
-
-        if verification_text.startswith(yes_token.upper()):
-            results.append(1.0)
-        elif verification_text.startswith(no_token.upper()):
-            results.append(0.0)
-        else:
-            results.append(0.0)
-
-    return torch.Tensor(results)
+from src.utils import calculate_costs, patch_dropout
 
 
 def surrogate_token_probs(
@@ -91,12 +9,13 @@ def surrogate_token_probs(
     prompts,
     generated_responses,
     questions,
-    device="cuda",
     yes_token="YES",
     no_token="NO",
     max_length=512,
-    normalize_by_length=None,
-    prompt_template="",
+    mc_dropout=False,
+    n=1,
+    dropout_proba=0.1,
+    output_input_price_ratio=4.0
 ):
     """
     Batched version of surrogate token probability approach.
@@ -106,9 +25,26 @@ def surrogate_token_probs(
     Then we do a single forward pass to get the next-token logits, from which we read off
     p(YES) and p(NO). Finally, we compute pYES / (pYES + pNO).
 
-    Returns: A list of floats [batch_size], each in [0,1], giving the probability
-             that the model chooses yes_token over no_token.
-             (If we can't find the token IDs, or p(no_token)=0 => handle edge cases.)
+    If mc_dropout=True, applies Monte Carlo dropout by running the model n times with
+    dropout enabled, then averaging the results.
+
+    Args:
+        model: The LLM to evaluate.
+        tokenizer: The tokenizer for the model.
+        prompts: A list of questions (strings).
+        generated_responses: A list of generated responses (strings).
+        questions: The original questions.
+        yes_token: The token representing "YES".
+        no_token: The token representing "NO".
+        max_length: Maximum sequence length for tokenization.
+        mc_dropout: Whether to use Monte Carlo dropout.
+        n: Number of repetitions for MC dropout (ignored if mc_dropout=False).
+        dropout_proba: dropout probability
+
+    Returns:
+        Tuple of (probabilities, costs) where:
+        - probabilities: torch.Tensor of shape [batch_size] containing p(YES) values
+        - costs: List of calculated costs for the verification
     """
     batch_size = len(prompts)
 
@@ -123,7 +59,10 @@ def surrogate_token_probs(
             f"Is this answer correct: {yes_token} or {no_token}?\n\n"
             "Answer: "
         )
-        verify_prompts.append(text)
+        if mc_dropout:
+            verify_prompts.extend([text] * n)  # Repeat each question n times
+        else:
+            verify_prompts.append(text)
 
     # Tokenize all in a batch
     inputs = tokenizer(
@@ -140,148 +79,181 @@ def surrogate_token_probs(
     yes_id = yes_ids[0] if yes_ids else None
     no_id = no_ids[0] if no_ids else None
 
+    # Apply MC dropout if requested
+    if mc_dropout:
+        patch_dropout(model, dropout_proba)
+        model.train()
+    
     # Single forward pass
     with torch.no_grad():
-        outputs = model(
-            **inputs
-        )  # outputs.logits shape: [batch_size, seq_len, vocab_size]
-
+        outputs = model(**inputs)
     logits = outputs.logits  # [batch, seq_len, vocab_size]
+    
+    # Reset dropout if we used it
+    if mc_dropout:
+        patch_dropout(model, 0.0)
+        model.eval()
 
-    # For each example i, the next token distribution is logits[i, seq_len-1]
-    # We'll apply softmax to that distribution to get probabilities
-    probs_list = []
-    for i in range(batch_size):
-        seq_len_i = inputs["input_ids"].size(
-            1
-        )  # because padding => same length for all
-        # The distribution for the next token:
-        next_token_logits = logits[i, seq_len_i - 1, :]  # shape [vocab_size]
-        dist = F.softmax(next_token_logits, dim=-1)
+    # Get sequence length and compute next token probabilities
+    seq_len = inputs["input_ids"].size(1)
+    next_token_logits = logits[:, seq_len - 1, :]  # [batch_size or batch_size*n, vocab_size]
+    next_token_probs = F.softmax(next_token_logits, dim=-1)
 
-        p_yes = dist[yes_id].item() if yes_id is not None else 0.0
-        p_no = dist[no_id].item() if no_id is not None else 0.0
-
-        denom = p_yes + p_no
-        if denom > 0:
-            p_yes_normalized = p_yes / denom
-        else:
-            # fallback if denom=0
-            p_yes_normalized = 0.5  # or 1.0, or 0.0, or however you want to handle
-
-        probs_list.append(p_yes_normalized)
-
-    # Calculate verification costs based on token counts
-    input_token_counts = [len(tokenizer.encode(prompt)) for prompt in verify_prompts]
-    output_token_counts = [0] * len(verify_prompts)  # No generation, only inference
-
-    # Extract model name from the model path or object
-    model_name = getattr(
-        model,
-        "name_or_path",
-        str(model).split("/")[-1] if "/" in str(model) else str(model),
+    # Extract probabilities for YES and NO tokens
+    p_yes = (
+        next_token_probs[:, yes_id]
+        if yes_id is not None
+        else torch.zeros(next_token_probs.size(0), device=model.device)
+    )
+    p_no = (
+        next_token_probs[:, no_id]
+        if no_id is not None
+        else torch.zeros(next_token_probs.size(0), device=model.device)
     )
 
+    # Normalize probabilities
+    denom = p_yes + p_no
+    p_yes_normalized = torch.where(
+        denom > 0, p_yes / denom, torch.full_like(p_yes, 0.5)
+    )  # Handle edge cases
+
+    # For MC dropout, reshape and average
+    if mc_dropout:
+        p_yes_normalized = p_yes_normalized.view(batch_size, n).mean(dim=1)
+
+    # Calculate verification costs based on token counts
+    input_token_counts = [
+        len(tokenizer.encode(verify_prompts[i])) * n
+        for i in range(0, len(verify_prompts), n)
+    ]
+    output_token_counts = [0] * batch_size
+
+
     # Calculate costs using the utility function
+    model_name_attr = getattr(model, "model_name", getattr(model, "name_or_path", "unknown"))
     verification_costs = [
         calculate_costs(
-            model_name=model_name,
+            model_name=model_name_attr,
             input_token_length=input_count,
             output_token_length=output_count,
-            output_input_price_ratio=1.0,  # irrelevant, because of no generation
+            output_input_price_ratio=output_input_price_ratio,  # irrelevant, because of no generation
         )
         for input_count, output_count in zip(input_token_counts, output_token_counts)
     ]
 
-    return torch.Tensor(probs_list), verification_costs
+    return p_yes_normalized, verification_costs
+    
 
-
-def sequence_probability(
+def self_verification(
     model,
     tokenizer,
     prompts,
     generated_responses,
     questions,
-    device="cuda",
-    normalize_by_length=True,
+    n=1,  # Number of repetitions for each prompt
     max_length=512,
-    prompt_template="",
+    max_new_tokens=4,
+    output_input_price_ratio=4.0,
+    mc_dropout=False,
 ):
     """
-    Computes the log probability (or average log probability) *only* over the generated
-    portion (i.e., ignoring the prompt tokens), for a batch of (prompts, generated_responses).
-    Returns a 1D tensor [batch_size] with the average log prob of the *generated* portion.
+    Computes the distribution of p(YES) for each question, repeated n times in a batch.
+
+    Args:
+        model: The LLM to evaluate.
+        tokenizer: The tokenizer for the model.
+        prompts: A list of questions (strings).
+        generated_responses: A list of generated responses (strings).
+        n: Number of times to repeat each question in the batch.
+        yes_token: The token representing "YES".
+        no_token: The token representing "NO".
+        max_length: Maximum sequence length for tokenization.
+        normalize_by_length: Optional; if provided, normalize probabilities by length.
+
+    Returns:
+        torch.Tensor of shape [batch_size, n] containing p(YES) values for each repetition.
     """
-    assert len(prompts) == len(generated_responses), "Mismatch in batch sizes!"
+    batch_size = len(prompts)
 
-    batch_full_texts = []
-    prompt_lengths = []
-    gen_lengths = []
+    # Build verification prompts for each item
+    verify_prompts = []
+    for question, candidate_answer in zip(questions, generated_responses):
+        text = (
+            "Given the following question and the model's answer, please evaluate correctness.\n"
+            f"Question: {question}\n\n"
+            f"Model Answer: {candidate_answer}\n\n"
+            f"Please give a confidence score on a scale of 0.0 to 1.0 for this prediction.\n\n"
+            "Answer: "
+        )
+        verify_prompts.extend([text] * n)  # Repeat each question n times
 
-    for prompt, full_text in zip(prompts, generated_responses):
-        gen_resp = full_text[len(prompt) :]
-        prompt_ids = tokenizer(prompt, add_special_tokens=False).input_ids
-        gen_ids = tokenizer(gen_resp, add_special_tokens=False).input_ids
-
-        prompt_len = len(prompt_ids)
-        gen_len = len(gen_ids)
-
-        batch_full_texts.append(full_text)
-        prompt_lengths.append(prompt_len)
-        gen_lengths.append(gen_len)
-
+    # Tokenize all in a batch
     inputs = tokenizer(
-        batch_full_texts,
+        verify_prompts,
         return_tensors="pt",
-        padding=True,
+        padding="max_length",
         truncation=True,
         max_length=max_length,
     ).to(model.device)
 
-    input_ids = inputs["input_ids"]  # [batch, seq_len]
-    attention_mask = inputs["attention_mask"]  # [batch, seq_len]
-
+    # Generate outputs
     with torch.no_grad():
-        outputs = model(**inputs)
-        logits = outputs.logits  # [batch, seq_len, vocab_size]
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            temperature=0.7,
+            return_dict_in_generate=True,
+            pad_token_id=tokenizer.pad_token_id,
+        )
 
-    # shift for causal LM
-    shift_logits = logits[:, :-1, :].contiguous().to(device)
-    shift_labels = input_ids[:, 1:].contiguous().to(device)
-    shift_mask = attention_mask[:, 1:].contiguous().to(device)
-
-    token_loss = F.cross_entropy(
-        shift_logits.view(-1, shift_logits.size(-1)),
-        shift_labels.view(-1),
-        reduction="none",
+    # Process generated outputs
+    generated_texts = tokenizer.batch_decode(
+        outputs.sequences[:, inputs.input_ids.shape[1] :], skip_special_tokens=True
     )
-    token_loss = token_loss.view(shift_labels.size())  # [batch, seq_len-1]
 
-    batch_log_probs = torch.zeros(shift_labels.size(0), device=device)
+    # Parse the confidence scores
+    confidence_scores = []
+    for text in generated_texts:
+        import re
 
-    for i in range(shift_labels.size(0)):
-        start_idx = prompt_lengths[i]
-        end_idx = prompt_lengths[i] + gen_lengths[i]
+        # Try to extract a float using regex
+        match = re.search(r"(\d+\.\d+|\d+)", text.strip())
+        if match:
+            # Convert the matched string to float
+            score = float(match.group(1))
+            # Ensure the score is between 0 and 1
+            score = max(0.0, min(1.0, score))
+            confidence_scores.append(score)
+        else:
+            # If no float is found, default to NaN
+            confidence_scores.append(torch.nan)
 
-        gen_start_in_shift = max(start_idx - 1, 0)
-        gen_end_in_shift = max(end_idx - 1, 0)
+    # Convert to tensor and reshape
+    confidence_tensor = torch.tensor(confidence_scores, device=model.device).view(
+        batch_size, n
+    )
 
-        seq_len_i = shift_labels.size(1)
-        gen_start_in_shift = min(gen_start_in_shift, seq_len_i)
-        gen_end_in_shift = min(gen_end_in_shift, seq_len_i)
+    # Calculate mean confidence, ignoring NaN values
+    mean_confidence = torch.nanmean(confidence_tensor, dim=1)
+    
+    
+    # Calculate verification costs based on token counts
+    input_token_counts = [
+        len(tokenizer.encode(verify_prompts[i])) * n
+        for i in range(0, len(verify_prompts), n)
+    ]
+    output_token_counts = [output_input_price_ratio] * batch_size
 
-        gen_loss_i = (token_loss[i, :] * shift_mask[i, :])[
-            gen_start_in_shift:gen_end_in_shift
-        ].sum()
-        seq_log_prob_i = -gen_loss_i
+    # Calculate costs using the utility function
+    model_name_attr = getattr(model, "model_name", getattr(model, "name_or_path", "unknown"))
+    verification_costs = [
+        calculate_costs(
+            model_name=model_name_attr,
+            input_token_length=input_count,
+            output_token_length=output_count,
+            output_input_price_ratio=output_input_price_ratio,  # irrelevant, because of no generation
+        )
+        for input_count, output_count in zip(input_token_counts, output_token_counts)
+    ]
 
-        if normalize_by_length:
-            n_gen_tokens = (
-                shift_mask[i, gen_start_in_shift:gen_end_in_shift] == 1
-            ).sum()
-            if n_gen_tokens > 0:
-                seq_log_prob_i /= n_gen_tokens
-
-        batch_log_probs[i] = seq_log_prob_i
-
-    return torch.exp(batch_log_probs)
+    return mean_confidence, verification_costs

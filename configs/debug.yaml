@@ -14,9 +14,9 @@ batch_size: 7 #60
 max_input_length: 512
 online:
   enable: false
-  initial_uncertainty_threshold_base: 0.347
-  initial_uncertainty_threshold_large: 0.347
-  initial_M: 1.0
+  initial_uncertainty_threshold_base: 5.0
+  initial_uncertainty_threshold_large: 5.0
+  initial_M: 0.0
   lr_tau: 0.01
   lr_M: 0.005
   error_penalty: 10
@@ -28,18 +28,18 @@ sft:
   lora_alpha: 64
   lora_dropout: 0.1
 verification_fn: surrogate_token_probs
-uncertainty_fn: surrogate_token_uncertainties
-uncertainty_samples: 5
+uncertainty_fn: surrogate_token_probs
+uncertainty_samples: 1
 precomputed:
-  enable: false
-  generation: false
+  enable: true
+  generation: true
   verification: false
   uncertainty: false
-  path: /home/
+  path: /home/azureuser/caf83/helm/results/run_20250427_224104_debug_arc_easy/results_debug.csv
 dataset:
   name: allenai/ai2_arc
   subset: ARC-Easy
   split: test
   num_samples: 100
 device: cuda:0
-name_postfix: debug
+name_postfix: debug_token_probs

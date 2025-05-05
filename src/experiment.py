@@ -147,6 +147,12 @@ class Experiment:
                         "large_uncertainty",
                         "base_prediction",
                         "large_prediction",
+                        "base_gen_cost",
+                        "large_gen_cost",
+                        "base_uncert_cost",
+                        "large_uncert_cost",
+                        "base_inf_cost",
+                        "large_inf_cost"
                     ],
                 ]
                 batch_idx += len(batch["answer"])
