@@ -119,3 +119,11 @@ python main.py --config-path=configs/medmcqa/experiment_3 --config-name=models_1
 python main.py --config-path=configs/medmcqa/experiment_3 --config-name=models_1_8
 python main.py --config-path=configs/medmcqa/experiment_3 --config-name=models_3_8
 ```
+
+
+```
+python main.py --config-path=configs/ai2arc_easy --config-name=first_qwen
+python main.py --config-path=configs/ai2arc_challenge --config-name=first_qwen
+python main.py --config-path=configs/medqa --config-name=first_qwen
+python main.py --config-path=configs/medmcqa --config-name=first_qwen
+```

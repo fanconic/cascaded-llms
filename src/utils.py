@@ -164,59 +164,56 @@ def plot_accuracy_vs_cost(
 
 def plot_accuracy_vs_cost_D1(
     run_dir,
-    cost_base,
-    accuracy_base,
-    accuracy_base_err,
-    cost_large,
-    accuracy_large,
-    accuracy_large_err,
+    experiment_data_list,  # List of tuples containing (experiment_name, metrics_dict)
     data_length,
-    dynamic_cost,
-    dynamic_accuracy,
-    dynamic_accuracy_err,
-    delta_ibc,
 ):
-    plt.figure(figsize=(3, 3))
+    plt.figure(figsize=(8, 8))  # Increased figure size for better visibility
 
+    # Plot base and large model points (only once since they're the same for all experiments)
     base_plot = plt.errorbar(
-        cost_base / data_length,
-        accuracy_base,
-        yerr=accuracy_base_err,
+        experiment_data_list[0][1]["cost_base"] / data_length,
+        experiment_data_list[0][1]["accuracy_base"],
+        yerr=experiment_data_list[0][1]["accuracy_base_err"],
         label="Base Model",
         fmt="o",
         capsize=5,
     )
     large_plot = plt.errorbar(
-        cost_large / data_length,
-        accuracy_large,
-        yerr=accuracy_large_err,
+        experiment_data_list[0][1]["cost_large"] / data_length,
+        experiment_data_list[0][1]["accuracy_large"],
+        yerr=experiment_data_list[0][1]["accuracy_large_err"],
         label="Large Model",
         fmt="o",
         capsize=5,
     )
 
-    dynamic_plot = plt.errorbar(
-        dynamic_cost / data_length,
-        dynamic_accuracy,
-        yerr=dynamic_accuracy_err,
-        label=r"$\phi_{\text{m2m}}$",
-        fmt="x",
-        capsize=5,
-    )
-
+    # Plot line between base and large model
     plt.plot(
-        [cost_base / data_length, cost_large / data_length],
-        [accuracy_base, accuracy_large],
+        [experiment_data_list[0][1]["cost_base"] / data_length, experiment_data_list[0][1]["cost_large"] / data_length],
+        [experiment_data_list[0][1]["accuracy_base"], experiment_data_list[0][1]["accuracy_large"]],
         linestyle="--",
         color="gray",
         alpha=0.7,
     )
 
+    # Plot dynamic points for each experiment
+    for experiment_name, metrics in experiment_data_list:
+        plt.errorbar(
+            metrics["dynamic_cost"] / data_length,
+            metrics["dynamic_accuracy"],
+            yerr=metrics["dynamic_accuracy_err"],
+            label=f"$\phi_{{m2m}}$ ({experiment_name})",
+            fmt="x",
+            capsize=5,
+        )
+
     plt.xlabel("Cost per Sample")
     plt.ylabel("Accuracy")
-    plt.title(rf"$\Delta$IBC = {delta_ibc:.2f}")
-    plt.legend()
-    plt.savefig(os.path.join(run_dir, "accuracy_vs_cost_d1.pdf"), bbox_inches="tight")
+    plt.title("Accuracy vs Cost Comparison")
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')  # Move legend outside plot
+    plt.tight_layout()  # Adjust layout to prevent label cutoff
+    plt.savefig(os.path.join(run_dir, "accuracy_vs_cost_combined.pdf"), bbox_inches="tight")
+    plt.close()
 
 
 def plot_decision_distribution(run_dir, decisions, labels):

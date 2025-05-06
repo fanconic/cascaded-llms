@@ -27,34 +27,25 @@ class AIDecisionSystem:
 
     def __init__(
         self,
+        base_model,
+        base_tokenizer,
+        large_model,
+        large_tokenizer,
         base_model_path: str,
         large_model_path: str,
-        verification_fn: Callable[
-            [
-                PreTrainedModel,
-                PreTrainedTokenizer,
-                List[str],
-                List[str],
-                List[str],
-                str,
-                bool,
-                str,
-            ],
-            Tensor,
-        ],
-        uncertainty_fn: Callable[
-            [PreTrainedModel, PreTrainedTokenizer, List[str], List[str], str, bool],
-            Tensor,
-        ],
+        verification_fn: Callable,
+        uncertainty_fn: Callable,
         model_config: ModelConfig,
         cost_config: CostConfig,
         online_config: OnlineConfig,
+        use_larger_model: bool,
     ):
         self.base_model_path = base_model_path
         self.large_model_path = large_model_path
         self.config = model_config
         self.costs = cost_config
         self.online_config = online_config
+        self.use_larger_model = use_larger_model
 
         self.initial_M = torch.tensor(
             [np.log(np.exp(online_config.initial_M) - 1)],
@@ -107,34 +98,12 @@ class AIDecisionSystem:
         # Store functions
         self.verification_fn = verification_fn
         self.uncertainty_fn = uncertainty_fn
+        
+        self.base_model = base_model
+        self.base_tokenizer = base_tokenizer
+        self.large_model = large_model
+        self.large_tokenizer = large_tokenizer
 
-        # Initialize models
-        if not (
-            self.config.precomputed.generation
-            and self.config.precomputed.verification
-            and self.config.precomputed.uncertainty
-        ):
-            self.base_model, self.base_tokenizer = self._initialize_model(
-                base_model_path, "Small"
-            )
-            self.large_model, self.large_tokenizer = self._initialize_model(
-                large_model_path, "Large"
-            )
-        else:
-            print("Generations have been precomputed")
-
-    def _initialize_model(
-        self, model_path: str, model_name: str
-    ) -> Tuple[PreTrainedModel, PreTrainedTokenizer]:
-        """Initialize a model and its tokenizer."""
-        print(f"Loading {model_name} Model: {model_path}")
-        tokenizer = AutoTokenizer.from_pretrained(model_path)
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-        tokenizer.padding_side = "left"
-
-        model = AutoModelForCausalLM.from_pretrained(model_path).to(self.config.device)
-        return model, tokenizer
 
     def generate_response(
         self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, prompts: List[str]
@@ -494,6 +463,8 @@ class AIDecisionSystem:
         expert_responses: List[List[str]],
         questions: List[str],
         precomputed_batch=None,
+        base_calibration_model=None,
+        large_calibration_model=None,
     ) -> Tuple[List[Dict[str, Any]], List[str], List[str]]:
         """Process a batch of prompts and make decisions with optional online learning."""
 
@@ -539,6 +510,15 @@ class AIDecisionSystem:
         #     base_probs.to(self.config.device) * F.softplus(self.M)
         # )
         # acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)
+        
+        # recalibrate if surrogate model is available:
+        if base_calibration_model is not None:
+            base_probs = self._apply_calibration(base_probs, base_calibration_model)
+            base_uncertainties = self._apply_calibration(base_uncertainties, base_calibration_model)
+        if large_calibration_model is not None:
+            large_probs_for_base = self._apply_calibration(large_probs_for_base, large_calibration_model)
+            large_uncertainties = self._apply_calibration(large_uncertainties, base_calibration_model)
+        
         acceptance_prob = large_probs_for_base.to(self.config.device)
 
         decisions = []
@@ -561,6 +541,7 @@ class AIDecisionSystem:
                 large_inf_cost=large_inf_costs[i],
                 base_uncert_cost=base_uncert_costs[i],
                 large_uncert_cost=large_uncert_costs[i],
+                use_larger_model=self.config.use_larger_model
             )
 
             system_risk = self._calculate_system_risk(
@@ -658,3 +639,34 @@ class AIDecisionSystem:
             self.update_parameters()
 
         return decisions
+    
+    def _apply_calibration(self, confidence_scores, calibration_model):
+        """
+        Apply calibration model to confidence scores.
+
+        Args:
+            confidence_scores: Array of model confidence scores
+            calibration_model: Fitted calibration model
+
+        Returns:
+            Array of calibrated confidence scores
+        """
+        import numpy as np
+        # Get the device of the input tensor for later use
+        device = confidence_scores.device if hasattr(confidence_scores, 'device') else torch.device('cpu')
+        confidence_scores = np.array(confidence_scores.cpu())
+        mask_high = confidence_scores >= 0.5
+        mask_low = confidence_scores < 0.5
+        # Avoid division by zero and log(0)
+        confidence_scores = np.clip(confidence_scores, 1e-6, 1-1e-6)
+        
+        # Apply different transformations based on value
+        transformed_scores = np.zeros_like(confidence_scores, dtype=float)
+        transformed_scores[mask_high] = np.log(1/(1 - confidence_scores[mask_high]))
+        transformed_scores[mask_low] = np.log(2) - np.log(1/confidence_scores[mask_low])
+        
+        confidence_scores = transformed_scores
+        confidence_scores_reshaped = np.array(confidence_scores).reshape(-1, 1)
+        
+        # Predict probabilities (calibrated scores)
+        return torch.Tensor(calibration_model.predict_proba(confidence_scores_reshaped)[:, 1]).to(device)

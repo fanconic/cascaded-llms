@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Callable
 from src.verification import self_verification, surrogate_token_probs
 
 VERIFICATION_FN_MAPPING = {
@@ -18,6 +18,7 @@ class ModelConfig:
     prompt_template: str = ""
     uncertainty_samples: int = 1
     batch_size: int = 5
+    use_larger_model: bool = True
 
 
 @dataclass
@@ -38,18 +39,16 @@ class ExperimentConfig:
 
     base_model: str
     large_model: str
-    verification_fn: str
-    uncertainty_fn: str
+    verification_fn: Callable
+    uncertainty_fn: Callable
     max_input_length: int
     max_new_tokens: int
     device: str
+    use_larger_model: bool
     precomputed: Dict
     uncertainty_samples: int = 1
     batch_size: int = 5
-
-    def __post_init__(self):
-        self.verification_fn = VERIFICATION_FN_MAPPING[self.verification_fn]
-        self.uncertainty_fn = VERIFICATION_FN_MAPPING[self.uncertainty_fn]
+    
 
 
 @dataclass

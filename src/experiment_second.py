@@ -21,7 +21,7 @@ from src.factory import DecisionMakerFactory
 from src.preprocessor import get_preprocessor
 
 
-class Experiment:
+class Experiment_second:
     """Handles experiment execution and data collection."""
 
     def __init__(self, cfg: DictConfig):
