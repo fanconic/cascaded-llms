@@ -680,10 +680,10 @@ class AIDecisionSystem:
             1 / confidence_scores[mask_low]
         )
 
-        # confidence_scores = transformed_scores
+        confidence_scores = transformed_scores
         confidence_scores_reshaped = np.array(confidence_scores).reshape(-1, 1)
 
         # Predict probabilities (calibrated scores)
         return torch.Tensor(
-            calibration_model.predict(confidence_scores_reshaped)[:, 1]
+            calibration_model.predict_proba(confidence_scores_reshaped)[:, 1]
         ).to(device)

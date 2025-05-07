@@ -56,8 +56,8 @@ class Experiment_first:
         self.decision_systems = []
         self.experiment_names = []
         for use_larger_model in self.use_larger_models:
-            for n in self.number_of_repetition:
-                for func in self.verification_funcs:
+            for func in self.verification_funcs:
+                for n in self.number_of_repetition:
                     exp_config = ExperimentConfig(
                         base_model=cfg.base_model,
                         large_model=cfg.large_model,
@@ -264,7 +264,7 @@ class Experiment_first:
                 batch["questions"],
                 precomputed_batch=precomputed_batch,
                 base_calibration_model=base_calibration_model,
-                large_on_small_calibration_model=base_calibration_model,
+                large_on_small_calibration_model=large_on_small_calibration_model,
                 large_calibration_model=large_calibration_model,
             )
 
@@ -287,7 +287,7 @@ class Experiment_first:
                         {
                             "base_prob": decision["base_probs"],
                             "large_prob": decision["large_probs"],
-                            "large_uncert": decision["large_uncert"],
+                            "large_uncert": decision["large_uncertainty"],
                             "base_correct": decision["base_prediction"]
                             == batch["answer"][i],
                             "large_correct": decision["large_prediction"]
@@ -554,7 +554,7 @@ class Experiment_first:
             1 / confidence_scores[mask_low]
         )
 
-        # confidence_scores = transformed_scores
+        confidence_scores = transformed_scores
         confidence_scores_reshaped = np.array(confidence_scores).reshape(-1, 1)
 
         # Initialize and fit logistic regression model (Platt scaling)

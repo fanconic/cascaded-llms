@@ -166,7 +166,22 @@ def plot_accuracy_vs_cost_D1(
     experiment_data_list,  # List of tuples containing (experiment_name, metrics_dict)
     data_length,
 ):
-    plt.figure(figsize=(8, 8))  # Increased figure size for better visibility
+    plt.figure(figsize=(8, 7))  # Increased figure size for better visibility
+    
+    NAMES_DICT = {
+        "self_verification_1_base" : "$\\text{SV}_{\\text{base}}$ ($n=1$)",
+        "self_verification_5_base" : "$\\text{SV}_{\\text{base}}$ ($n=5$)",
+        "surrogate_token_probs_1_base" : "$\\text{STP}_{\\text{base}}$ ($n=1$)",
+        "surrogate_token_probs_5_base" : "$\\text{STP}_{\\text{base}}$ ($n=5$)",
+        "self_verification_1_large" : "$\\text{SV}_{\\text{large}}$ ($n=1$)",
+        "self_verification_5_large" : "$\\text{SV}_{\\text{large}}$ ($n=5$)",
+        "surrogate_token_probs_1_large" : "$\\text{STP}_{\\text{large}}$ ($n=1$)",
+        "surrogate_token_probs_5_large" : "$\\text{STP}_{\\text{large}}$ ($n=5$)",
+    }
+    
+    # Get the default color cycle from matplotlib
+    prop_cycle = plt.rcParams['axes.prop_cycle']
+    colors = prop_cycle.by_key()['color']
 
     # Plot base and large model points (only once since they're the same for all experiments)
     base_plot = plt.errorbar(
@@ -176,6 +191,7 @@ def plot_accuracy_vs_cost_D1(
         label="Base Model",
         fmt="o",
         capsize=5,
+        color=colors[0]
     )
     large_plot = plt.errorbar(
         experiment_data_list[0][1]["cost_large"] / data_length,
@@ -184,6 +200,7 @@ def plot_accuracy_vs_cost_D1(
         label="Large Model",
         fmt="o",
         capsize=5,
+        color=colors[1]
     )
 
     # Plot line between base and large model
@@ -203,19 +220,46 @@ def plot_accuracy_vs_cost_D1(
 
     # Plot dynamic points for each experiment
     for experiment_name, metrics in experiment_data_list:
+        # Choose marker based on experiment name
+        if "1" in experiment_name:
+            marker = "x"
+        elif "5" in experiment_name:
+            marker = "^"
+        else:
+            marker = "s"  # Default square marker
+        
+        # Choose color based on verification method and model size
+        if "surrogate_token_probs" in experiment_name:
+            if "base" in experiment_name:
+                color = colors[2]
+            elif "large" in experiment_name:
+                color = colors[3]
+            else:
+                color = colors[4]  # Use third color from default cycle
+        elif "self_verification" in experiment_name:
+            if "base" in experiment_name:
+                color = colors[5]
+            elif "large" in experiment_name:
+                color = colors[6]
+            else:
+                color = colors[7]
+        else:
+            color = colors[8]
+            
         plt.errorbar(
             metrics["dynamic_cost"] / data_length,
             metrics["dynamic_accuracy"],
             yerr=metrics["dynamic_accuracy_err"],
-            label=f"$\phi_{{m2m}}$ ({experiment_name})",
-            fmt="x",
+            label=NAMES_DICT[experiment_name],
+            fmt=marker,
             capsize=5,
+            color=color
         )
 
     plt.xlabel("Cost per Sample")
     plt.ylabel("Accuracy")
     plt.title("Accuracy vs Cost Comparison")
-    plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left")  # Move legend outside plot
+    plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1), ncol=5)  # Place legend at the bottom
     plt.tight_layout()  # Adjust layout to prevent label cutoff
     plt.savefig(
         os.path.join(run_dir, "accuracy_vs_cost_combined.pdf"), bbox_inches="tight"
