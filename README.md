@@ -127,3 +127,5 @@ python main.py --config-path=configs/ai2arc_challenge --config-name=first_qwen
 python main.py --config-path=configs/medqa --config-name=first_qwen
 python main.py --config-path=configs/medmcqa --config-name=first_qwen
 ```
+
+python main.py --config-path=configs/ai2arc_easy --config-name=first_llama_calibrated

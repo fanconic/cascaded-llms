@@ -24,7 +24,7 @@ class DecisionMakerFactory:
             precomputed=exp_config.precomputed,
             uncertainty_samples=exp_config.uncertainty_samples,
             batch_size=exp_config.batch_size,
-            use_larger_model=exp_config.use_larger_model
+            use_larger_model=exp_config.use_larger_model,
         )
 
         cost_config_obj = CostConfig(**cost_config)
@@ -51,5 +51,5 @@ class DecisionMakerFactory:
             model_config=model_config,
             cost_config=cost_config_obj,
             online_config=online_config_obj,
-            use_larger_model=exp_config.use_larger_model
+            use_larger_model=exp_config.use_larger_model,
         )

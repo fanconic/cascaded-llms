@@ -2,8 +2,8 @@ experiment: first #"first" runs the deferal experiment, "second" runs the online
 seed: 42
 results_dir: followup_results
 max_new_tokens: 512
-calibrate: false
-calibration_size: 100
+calibrate: true
+calibration_size: 300
 costs:
   output_input_price_ratio: 5
   base_gen_cost: 1.0
@@ -13,7 +13,7 @@ costs:
   mistake_cost: 16.81 # Adjusted to fir system risk
 base_model: Qwen/Qwen2.5-1.5B-Instruct
 large_model: Qwen/Qwen2.5-7B-Instruct
-batch_size: 7 #60
+batch_size: 100
 max_input_length: 512
 online:
   enable: false
@@ -36,13 +36,13 @@ uncertainty_samples: 1
 precomputed:
   enable: true
   generation: true
-  verification: false
-  uncertainty: false
-  path: /home/azureuser/caf83/helm/results/run_20250427_224104_debug_arc_easy/results_debug.csv
+  verification: true
+  uncertainty: true
+  path: /home/azureuser/caf83/helm/followup_results/run_20250505_231447_first_qwen_medqa
 dataset:
-  name: allenai/ai2_arc
-  subset: ARC-Easy
-  split: test
+  name: HuggingSara/medqa
+  subset: 
+  split: validation
   num_samples: -1
-device: cuda:0
-name_postfix: first_qwen_arc_easy
+device: cuda:2
+name_postfix: first_qwen_medqa_calibrated

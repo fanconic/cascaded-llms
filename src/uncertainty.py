@@ -179,8 +179,6 @@ def verdict_distribution_entropy(
     return verdict_entropy
 
 
-
-
 def surrogate_token_uncertainties(
     model,
     tokenizer,
@@ -287,7 +285,9 @@ def surrogate_token_uncertainties(
         len(tokenizer.encode(verify_prompts[i])) * n
         for i in range(0, len(verify_prompts), n)
     ]
-    output_token_counts = [0] * int(len(verify_prompts)/n)  # No generation, only inference
+    output_token_counts = [0] * int(
+        len(verify_prompts) / n
+    )  # No generation, only inference
 
     # Extract model name from the model path or object
     model_name = getattr(

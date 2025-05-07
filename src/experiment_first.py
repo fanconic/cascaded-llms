@@ -23,9 +23,6 @@ from transformers import (
 )
 
 
-
-
-
 class Experiment_first:
     """Handles experiment execution and data collection."""
 
@@ -36,9 +33,9 @@ class Experiment_first:
         self.preprocessor = get_preprocessor(cfg.dataset.name)
 
         self.use_larger_models = [False, True]
-        self.number_of_repetition = [1]
+        self.number_of_repetition = [1, 5]
         self.verification_funcs = [self_verification, surrogate_token_probs]
-        
+
         # Initialize models
         if not (
             self.cfg.precomputed.generation
@@ -55,8 +52,7 @@ class Experiment_first:
             print("Generations have been precomputed")
             self.base_model, self.base_tokenizer = None, None
             self.large_model, self.large_tokenizer = None, None
-    
-        
+
         self.decision_systems = []
         self.experiment_names = []
         for use_larger_model in self.use_larger_models:
@@ -73,7 +69,7 @@ class Experiment_first:
                         precomputed=cfg.precomputed,
                         uncertainty_samples=n,
                         batch_size=cfg.batch_size,
-                        use_larger_model=use_larger_model
+                        use_larger_model=use_larger_model,
                     )
 
                     decision_system = DecisionMakerFactory.create_decision_maker(
@@ -81,13 +77,54 @@ class Experiment_first:
                         self.base_tokenizer,
                         self.large_model,
                         self.large_tokenizer,
-                        exp_config, cfg.online, cfg.costs
+                        exp_config,
+                        cfg.online,
+                        cfg.costs,
                     )
                     self.decision_systems.append(decision_system)
-                    self.experiment_names.append(f"{func.__name__}_{n}_{'large' if use_larger_model else 'base'}")
+                    self.experiment_names.append(
+                        f"{func.__name__}_{n}_{'large' if use_larger_model else 'base'}"
+                    )
 
         if self.cfg.precomputed.enable:
-            self.precomputed_df = pd.read_csv(self.cfg.precomputed.path)
+            self.precomputed_dfs = {}
+            for experiment_name in self.experiment_names:
+                # Check if the path is a CSV file or a directory
+                if self.cfg.precomputed.path.endswith(".csv"):
+                    # If it's a CSV file, read it for each experiment name
+                    precomputed_path = self.cfg.precomputed.path
+                    if os.path.exists(precomputed_path):
+                        self.precomputed_dfs[experiment_name] = pd.read_csv(
+                            precomputed_path
+                        )
+                    else:
+                        raise FileNotFoundError(
+                            f"Precomputed results file not found at {precomputed_path}"
+                        )
+                else:
+                    # If it's a directory, use the original log
+                    # Extract name_postfix from the last folder in precomputed.path
+                    last_folder = os.path.basename(
+                        os.path.normpath(self.cfg.precomputed.path)
+                    )
+                    name_postfix = (
+                        "_".join(last_folder.split("_")[3:])
+                        if "_" in last_folder
+                        else ""
+                    )
+
+                    precomputed_path = os.path.join(
+                        self.cfg.precomputed.path,
+                        f"results_{name_postfix}_{experiment_name}.csv",
+                    )
+                    if os.path.exists(precomputed_path):
+                        self.precomputed_dfs[experiment_name] = pd.read_csv(
+                            precomputed_path
+                        )
+                    else:
+                        raise FileNotFoundError(
+                            f"Precomputed results file not found for experiment {experiment_name} at {precomputed_path}"
+                        )
 
     def _load_dataset(self):
         if self.cfg.dataset.subset:
@@ -118,21 +155,25 @@ class Experiment_first:
         """Execute the experiment and collect results."""
         # Apply preprocessing
         preprocessed_data = self.preprocessor.preprocess(self.dataset, self.cfg)
-        
+
         dataloader = DataLoader(
             preprocessed_data, batch_size=self.cfg.batch_size, shuffle=False
         )
-        
+
         results = []
-        for experiment_name, decision_system in zip(self.experiment_names, self.decision_systems):
+        for experiment_name, decision_system in zip(
+            self.experiment_names, self.decision_systems
+        ):
             print(f"Decision System: {experiment_name}")
-            result = self._collect_results(dataloader, decision_system=decision_system)
+            result = self._collect_results(
+                dataloader,
+                decision_system=decision_system,
+                experiment_name=experiment_name,
+            )
             results.append((experiment_name, result))
-            
-            
+
         self._analyze_and_save_results(results)
-       
-        
+
     def _initialize_model(
         self, model_path: str, model_name: str
     ) -> Tuple[PreTrainedModel, PreTrainedTokenizer]:
@@ -146,7 +187,9 @@ class Experiment_first:
         model = AutoModelForCausalLM.from_pretrained(model_path).to(self.cfg.device)
         return model, tokenizer
 
-    def _collect_results(self, dataloader: DataLoader, decision_system) -> Dict:
+    def _collect_results(
+        self, dataloader: DataLoader, decision_system, experiment_name
+    ) -> Dict:
         collectors = {
             "questions": [],
             "decisions": [],
@@ -190,10 +233,11 @@ class Experiment_first:
         calibration_data = []
         base_calibration_model = None
         large_calibration_model = None
-        
+        large_on_small_calibration_model = None
+
         for batch in tqdm(dataloader):
             if self.cfg.precomputed.enable:
-                precomputed_batch = self.precomputed_df.loc[
+                precomputed_batch = self.precomputed_dfs[experiment_name].loc[
                     batch_idx : batch_idx + len(batch["answer"]) - 1,
                     [
                         "base_response",
@@ -209,7 +253,7 @@ class Experiment_first:
                         "base_uncert_cost",
                         "large_uncert_cost",
                         "base_inf_cost",
-                        "large_inf_cost"
+                        "large_inf_cost",
                     ],
                 ]
                 batch_idx += len(batch["answer"])
@@ -220,48 +264,67 @@ class Experiment_first:
                 batch["questions"],
                 precomputed_batch=precomputed_batch,
                 base_calibration_model=base_calibration_model,
+                large_on_small_calibration_model=base_calibration_model,
                 large_calibration_model=large_calibration_model,
             )
 
+            # Data is appended to the collectors
+            self._process_batch_results(
+                batch_decisions,
+                batch,
+                collectors,
+            )
+
             # Collect data for calibration
-            if base_calibration_model is None and large_calibration_model is None and self.cfg.calibrate:
+            if (
+                base_calibration_model is None
+                and large_calibration_model is None
+                and large_on_small_calibration_model is None
+                and self.cfg.calibrate
+            ):
                 for i, decision in enumerate(batch_decisions):
-                    calibration_data.append({
-                        "base_prob": decision["base_probs"],
-                        "large_prob": decision["large_probs"],
-                        "base_correct": decision["base_prediction"] == batch["answer"][i],
-                        "large_correct": decision["large_prediction"] == batch["answer"][i]
-                    })
-                
+                    calibration_data.append(
+                        {
+                            "base_prob": decision["base_probs"],
+                            "large_prob": decision["large_probs"],
+                            "large_uncert": decision["large_uncert"],
+                            "base_correct": decision["base_prediction"]
+                            == batch["answer"][i],
+                            "large_correct": decision["large_prediction"]
+                            == batch["answer"][i],
+                        }
+                    )
+
                 # After collecting n samples, calibrate the probabilities
                 if len(calibration_data) >= self.cfg.calibration_size:
                     import pandas as pd
+
                     calib_df = pd.DataFrame(calibration_data)
-                    
+
                     # Calibrate base model probabilities
                     base_calibration_model = self._calibrate_confidence_scores(
-                        calib_df["base_prob"].values,
-                        calib_df["base_correct"].values
+                        calib_df["base_prob"].values, calib_df["base_correct"].values
                     )
-                    
+
+                    # Calibrate large model probabilities
+                    large_on_small_calibration_model = (
+                        self._calibrate_confidence_scores(
+                            calib_df["large_prob"].values,
+                            calib_df["base_correct"].values,
+                        )
+                    )
+
                     # Calibrate large model probabilities
                     large_calibration_model = self._calibrate_confidence_scores(
-                        calib_df["large_prob"].values,
-                        calib_df["large_correct"].values
+                        calib_df["large_uncert"].values,
+                        calib_df["large_correct"].values,
                     )
-                    
-                    print("Calibration models created after 100 samples")
-                    
-            else:
-                # Data is appended to the collectors
-                self._process_batch_results(
-                    batch_decisions,
-                    batch,
-                    collectors,
-                )
+
+                    print(
+                        f"Calibration models created after {self.cfg.calibration_size} samples"
+                    )
 
         return collectors
-        
 
     def _process_batch_results(
         self,
@@ -354,35 +417,40 @@ class Experiment_first:
         # Create DataFrame from results and collect all metrics
         all_metrics = []
         experiment_data_list = []
-        
+
         for experiment_name, result in results:
             data = pd.DataFrame(self._create_dataframe_dict(result))
-            
+
+            # Cut away data that was used for calibration
+            data = data.iloc[self.cfg.calibration_size :]
+
             # Calculate metrics for this experiment
             metrics = self._calculate_metrics(data)
             metrics["experiment_name"] = experiment_name
             all_metrics.append(metrics)
             experiment_data_list.append((experiment_name, metrics))
-            
+
             # Save individual experiment results
             data.to_csv(
-                os.path.join(self.run_dir, f"results_{self.cfg.name_postfix}_{experiment_name}.csv"),
+                os.path.join(
+                    self.run_dir,
+                    f"results_{self.cfg.name_postfix}_{experiment_name}.csv",
+                ),
                 index=False,
             )
-        
+
         # Create combined plot
         plot_accuracy_vs_cost_D1(
             self.run_dir,
             experiment_data_list,
-            len(data)  # Using length of last experiment's data
+            len(data),  # Using length of last experiment's data
         )
-        
+
         # Save all metrics to a single CSV file
         pd.DataFrame(all_metrics).to_csv(
-            os.path.join(self.run_dir, f"metrics_combined.csv"),
-            index=False
+            os.path.join(self.run_dir, f"metrics_combined.csv"), index=False
         )
-    
+
     def _calculate_metrics(self, data: pd.DataFrame) -> Dict:
         """Calculate accuracy metrics for a single experiment."""
         # Calculate base and large model accuracies
@@ -451,7 +519,6 @@ class Experiment_first:
             "dibc_large2expert": delta_ibc_large2expert,
         }
 
-
     def _calibrate_confidence_scores(self, confidence_scores, correctness):
         """
         Calibrate confidence scores using Platt scaling.
@@ -464,60 +531,38 @@ class Experiment_first:
             Fitted sklearn.linear_model.LogisticRegression model
         """
         from sklearn.linear_model import LogisticRegression
+        from sklearn.isotonic import IsotonicRegression
         import numpy as np
 
         # Reshape confidence scores for sklearn --> Zelliger & Thomson transformation
         # Handle edge cases for p=0 and p=1
         confidence_scores = np.array(confidence_scores)
+
+        # Replace NaN values with 0
+        confidence_scores = np.nan_to_num(confidence_scores, nan=0.0)
+
         mask_high = confidence_scores >= 0.5
         mask_low = confidence_scores < 0.5
-        
+
         # Avoid division by zero and log(0)
-        confidence_scores = np.clip(confidence_scores, 1e-15, 1-1e-15)
-        
+        confidence_scores = np.clip(confidence_scores, 1e-6, 1 - 1e-6)
+
         # Apply different transformations based on value
         transformed_scores = np.zeros_like(confidence_scores, dtype=float)
-        transformed_scores[mask_high] = np.log(1/(1 - confidence_scores[mask_high]))
-        transformed_scores[mask_low] = np.log(2) - np.log(1/confidence_scores[mask_low])
-        
-        confidence_scores = transformed_scores
+        transformed_scores[mask_high] = np.log(1 / (1 - confidence_scores[mask_high]))
+        transformed_scores[mask_low] = np.log(2) - np.log(
+            1 / confidence_scores[mask_low]
+        )
+
+        # confidence_scores = transformed_scores
         confidence_scores_reshaped = np.array(confidence_scores).reshape(-1, 1)
-        
+
         # Initialize and fit logistic regression model (Platt scaling)
-        lr = LogisticRegression(C=1.0, solver='lbfgs')
-        lr.fit(confidence_scores_reshaped, correctness)
+        model = LogisticRegression(C=1.0, solver="lbfgs")
+        model.fit(confidence_scores_reshaped, correctness)
 
-        return lr
+        # Initialize and fit isotonic regression model
+        # model = IsotonicRegression(out_of_bounds="clip")
+        # model.fit(confidence_scores_reshaped, correctness)
 
-    def _apply_calibration(self, confidence_scores, calibration_model):
-        """
-        Apply calibration model to confidence scores.
-
-        Args:
-            confidence_scores: Array of model confidence scores
-            calibration_model: Fitted calibration model
-
-        Returns:
-            Array of calibrated confidence scores
-        """
-        import numpy as np
-        
-        # Reshape confidence scores for sklearn --> Zelliger & Thomson transformation
-        # Handle edge cases for p=0 and p=1
-        confidence_scores = np.array(confidence_scores)
-        mask_high = confidence_scores >= 0.5
-        mask_low = confidence_scores < 0.5
-        
-        # Avoid division by zero and log(0)
-        confidence_scores = np.clip(confidence_scores, 1e-6, 1-1e-6)
-        
-        # Apply different transformations based on value
-        transformed_scores = np.zeros_like(confidence_scores, dtype=float)
-        transformed_scores[mask_high] = np.log(1/(1 - confidence_scores[mask_high]))
-        transformed_scores[mask_low] = np.log(2) - np.log(1/confidence_scores[mask_low])
-        
-        confidence_scores = transformed_scores
-        confidence_scores_reshaped = np.array(confidence_scores).reshape(-1, 1)
-        
-        # Predict probabilities (calibrated scores)
-        return calibration_model.predict_proba(confidence_scores_reshaped)[:, 1]
+        return model

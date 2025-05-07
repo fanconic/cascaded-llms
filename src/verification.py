@@ -15,7 +15,7 @@ def surrogate_token_probs(
     mc_dropout=False,
     n=1,
     dropout_proba=0.1,
-    output_input_price_ratio=4.0
+    output_input_price_ratio=4.0,
 ):
     """
     Batched version of surrogate token probability approach.
@@ -83,12 +83,12 @@ def surrogate_token_probs(
     if mc_dropout:
         patch_dropout(model, dropout_proba)
         model.train()
-    
+
     # Single forward pass
     with torch.no_grad():
         outputs = model(**inputs)
     logits = outputs.logits  # [batch, seq_len, vocab_size]
-    
+
     # Reset dropout if we used it
     if mc_dropout:
         patch_dropout(model, 0.0)
@@ -96,7 +96,9 @@ def surrogate_token_probs(
 
     # Get sequence length and compute next token probabilities
     seq_len = inputs["input_ids"].size(1)
-    next_token_logits = logits[:, seq_len - 1, :]  # [batch_size or batch_size*n, vocab_size]
+    next_token_logits = logits[
+        :, seq_len - 1, :
+    ]  # [batch_size or batch_size*n, vocab_size]
     next_token_probs = F.softmax(next_token_logits, dim=-1)
 
     # Extract probabilities for YES and NO tokens
@@ -128,9 +130,10 @@ def surrogate_token_probs(
     ]
     output_token_counts = [0] * batch_size
 
-
     # Calculate costs using the utility function
-    model_name_attr = getattr(model, "model_name", getattr(model, "name_or_path", "unknown"))
+    model_name_attr = getattr(
+        model, "model_name", getattr(model, "name_or_path", "unknown")
+    )
     verification_costs = [
         calculate_costs(
             model_name=model_name_attr,
@@ -142,7 +145,7 @@ def surrogate_token_probs(
     ]
 
     return p_yes_normalized, verification_costs
-    
+
 
 def self_verification(
     model,
@@ -235,8 +238,7 @@ def self_verification(
 
     # Calculate mean confidence, ignoring NaN values
     mean_confidence = torch.nanmean(confidence_tensor, dim=1)
-    
-    
+
     # Calculate verification costs based on token counts
     input_token_counts = [
         len(tokenizer.encode(verify_prompts[i])) * n
@@ -245,7 +247,9 @@ def self_verification(
     output_token_counts = [output_input_price_ratio] * batch_size
 
     # Calculate costs using the utility function
-    model_name_attr = getattr(model, "model_name", getattr(model, "name_or_path", "unknown"))
+    model_name_attr = getattr(
+        model, "model_name", getattr(model, "name_or_path", "unknown")
+    )
     verification_costs = [
         calculate_costs(
             model_name=model_name_attr,

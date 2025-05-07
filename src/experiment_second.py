@@ -152,7 +152,7 @@ class Experiment_second:
                         "base_uncert_cost",
                         "large_uncert_cost",
                         "base_inf_cost",
-                        "large_inf_cost"
+                        "large_inf_cost",
                     ],
                 ]
                 batch_idx += len(batch["answer"])

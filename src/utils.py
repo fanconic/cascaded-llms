@@ -63,7 +63,6 @@ def patch_dropout(model, p):
             layer.self_attn.attention_dropout = p
 
 
-
 def extract_predictions(response: str) -> str:
     """Extract the single prediction from the response text.
 
@@ -189,8 +188,14 @@ def plot_accuracy_vs_cost_D1(
 
     # Plot line between base and large model
     plt.plot(
-        [experiment_data_list[0][1]["cost_base"] / data_length, experiment_data_list[0][1]["cost_large"] / data_length],
-        [experiment_data_list[0][1]["accuracy_base"], experiment_data_list[0][1]["accuracy_large"]],
+        [
+            experiment_data_list[0][1]["cost_base"] / data_length,
+            experiment_data_list[0][1]["cost_large"] / data_length,
+        ],
+        [
+            experiment_data_list[0][1]["accuracy_base"],
+            experiment_data_list[0][1]["accuracy_large"],
+        ],
         linestyle="--",
         color="gray",
         alpha=0.7,
@@ -210,9 +215,11 @@ def plot_accuracy_vs_cost_D1(
     plt.xlabel("Cost per Sample")
     plt.ylabel("Accuracy")
     plt.title("Accuracy vs Cost Comparison")
-    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')  # Move legend outside plot
+    plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left")  # Move legend outside plot
     plt.tight_layout()  # Adjust layout to prevent label cutoff
-    plt.savefig(os.path.join(run_dir, "accuracy_vs_cost_combined.pdf"), bbox_inches="tight")
+    plt.savefig(
+        os.path.join(run_dir, "accuracy_vs_cost_combined.pdf"), bbox_inches="tight"
+    )
     plt.close()
 
 

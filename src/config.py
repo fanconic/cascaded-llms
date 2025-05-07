@@ -7,6 +7,7 @@ VERIFICATION_FN_MAPPING = {
     "self_verification": self_verification,
 }
 
+
 @dataclass
 class ModelConfig:
     """Configuration for model initialization and generation."""
@@ -48,7 +49,6 @@ class ExperimentConfig:
     precomputed: Dict
     uncertainty_samples: int = 1
     batch_size: int = 5
-    
 
 
 @dataclass

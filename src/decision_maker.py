@@ -98,12 +98,11 @@ class AIDecisionSystem:
         # Store functions
         self.verification_fn = verification_fn
         self.uncertainty_fn = uncertainty_fn
-        
+
         self.base_model = base_model
         self.base_tokenizer = base_tokenizer
         self.large_model = large_model
         self.large_tokenizer = large_tokenizer
-
 
     def generate_response(
         self, model: PreTrainedModel, tokenizer: PreTrainedTokenizer, prompts: List[str]
@@ -141,7 +140,9 @@ class AIDecisionSystem:
                 output_token_count,
                 self.costs.output_input_price_ratio,
             )
-            for (input_token_count, output_token_count) in zip(input_token_counts, output_token_counts)
+            for (input_token_count, output_token_count) in zip(
+                input_token_counts, output_token_counts
+            )
         ]
         generated_output = [
             tokenizer.decode(output, skip_special_tokens=True)[len(prompt) :]
@@ -169,7 +170,7 @@ class AIDecisionSystem:
                 questions=questions,
                 output_input_price_ratio=self.costs.output_input_price_ratio,
                 n=self.config.uncertainty_samples,
-                mc_dropout=self.config.uncertainty_samples > 1
+                mc_dropout=self.config.uncertainty_samples > 1,
             )
 
             large_probs_for_base, large_inf_costs = self.verification_fn(
@@ -180,13 +181,13 @@ class AIDecisionSystem:
                 generated_responses=base_answer,
                 output_input_price_ratio=self.costs.output_input_price_ratio,
                 n=self.config.uncertainty_samples,
-                mc_dropout=self.config.uncertainty_samples > 1
+                mc_dropout=self.config.uncertainty_samples > 1,
             )
         else:
             base_probs = torch.Tensor(precomputed_batch["base_prob"].values)
             large_probs_for_base = torch.Tensor(precomputed_batch["large_prob"].values)
-            base_inf_costs =precomputed_batch["base_inf_cost"].tolist()
-            large_inf_costs =precomputed_batch["base_inf_cost"].tolist()
+            base_inf_costs = precomputed_batch["base_inf_cost"].tolist()
+            large_inf_costs = precomputed_batch["base_inf_cost"].tolist()
 
         if not self.config.precomputed.uncertainty:
             base_uncertainties, base_uncert_costs = self.verification_fn(
@@ -197,7 +198,7 @@ class AIDecisionSystem:
                 generated_responses=base_answer,
                 output_input_price_ratio=self.costs.output_input_price_ratio,
                 n=self.config.uncertainty_samples,
-                mc_dropout=self.config.uncertainty_samples > 1
+                mc_dropout=self.config.uncertainty_samples > 1,
             )
 
             large_uncertainties, large_uncert_costs = self.verification_fn(
@@ -208,19 +209,19 @@ class AIDecisionSystem:
                 generated_responses=large_answer,
                 output_input_price_ratio=self.costs.output_input_price_ratio,
                 n=self.config.uncertainty_samples,
-                mc_dropout=self.config.uncertainty_samples > 1
+                mc_dropout=self.config.uncertainty_samples > 1,
             )
-            
+
         else:
             base_uncertainties = torch.Tensor(
                 precomputed_batch["base_uncertainty"].values
             )
-            base_uncert_costs =precomputed_batch["base_uncert_cost"].tolist()
+            base_uncert_costs = precomputed_batch["base_uncert_cost"].tolist()
             large_uncertainties = torch.Tensor(
                 precomputed_batch["large_uncertainty"].values
             )
             large_uncert_costs = precomputed_batch["large_uncert_cost"].tolist()
-            
+
         return (
             base_probs,
             large_probs_for_base,
@@ -247,26 +248,25 @@ class AIDecisionSystem:
         large_gen_cost: float,
         base_uncert_cost: float,
         large_uncert_cost: float,
-        use_larger_model: bool = True
+        use_larger_model: bool = True,
     ) -> Tuple[int, str, float]:
         """Make a decision for a single prompt."""
-        
+
         if use_larger_model:
-            acceptance_probability =large_prob
+            acceptance_probability = large_prob
             first_inf_cost = large_inf_cost
         else:
             acceptance_probability = base_prob
             first_inf_cost = base_inf_cost
-            
+
         u = random.random()
         if u < acceptance_probability:
             if base_uncert > F.softplus(self.tau_base):
                 return (
                     2,
                     f"Expert Reponse: The best answer is {expert_response}",
-                    base_gen_cost
-                    + first_inf_cost
-                    #+ large_uncert_cost
+                    base_gen_cost + first_inf_cost
+                    # + large_uncert_cost
                     + self.costs.expert_cost,
                     base_uncert,
                     u,
@@ -274,8 +274,7 @@ class AIDecisionSystem:
             return (
                 0,
                 base_response,
-                base_gen_cost 
-                + first_inf_cost,
+                base_gen_cost + first_inf_cost,
                 base_uncert,
                 u,
             )
@@ -295,10 +294,8 @@ class AIDecisionSystem:
             return (
                 1,
                 large_response,
-                base_gen_cost 
-                + first_inf_cost 
-                + large_gen_cost,
-                #+ large_uncert_cost,
+                base_gen_cost + first_inf_cost + large_gen_cost,
+                # + large_uncert_cost,
                 large_uncert,
                 u,
             )
@@ -464,6 +461,7 @@ class AIDecisionSystem:
         questions: List[str],
         precomputed_batch=None,
         base_calibration_model=None,
+        large_on_small_calibration_model=None,
         large_calibration_model=None,
     ) -> Tuple[List[Dict[str, Any]], List[str], List[str]]:
         """Process a batch of prompts and make decisions with optional online learning."""
@@ -510,15 +508,23 @@ class AIDecisionSystem:
         #     base_probs.to(self.config.device) * F.softplus(self.M)
         # )
         # acceptance_prob = torch.clip(ratio, min=0.0, max=1.0)
-        
+
         # recalibrate if surrogate model is available:
         if base_calibration_model is not None:
             base_probs = self._apply_calibration(base_probs, base_calibration_model)
-            base_uncertainties = self._apply_calibration(base_uncertainties, base_calibration_model)
+            base_uncertainties = self._apply_calibration(
+                base_uncertainties, base_calibration_model
+            )
         if large_calibration_model is not None:
-            large_probs_for_base = self._apply_calibration(large_probs_for_base, large_calibration_model)
-            large_uncertainties = self._apply_calibration(large_uncertainties, base_calibration_model)
-        
+            large_uncertainties = self._apply_calibration(
+                large_uncertainties, large_calibration_model
+            )
+
+        if large_on_small_calibration_model is not None:
+            large_probs_for_base = self._apply_calibration(
+                large_probs_for_base, large_on_small_calibration_model
+            )
+
         acceptance_prob = large_probs_for_base.to(self.config.device)
 
         decisions = []
@@ -541,7 +547,7 @@ class AIDecisionSystem:
                 large_inf_cost=large_inf_costs[i],
                 base_uncert_cost=base_uncert_costs[i],
                 large_uncert_cost=large_uncert_costs[i],
-                use_larger_model=self.config.use_larger_model
+                use_larger_model=self.config.use_larger_model,
             )
 
             system_risk = self._calculate_system_risk(
@@ -639,7 +645,7 @@ class AIDecisionSystem:
             self.update_parameters()
 
         return decisions
-    
+
     def _apply_calibration(self, confidence_scores, calibration_model):
         """
         Apply calibration model to confidence scores.
@@ -652,21 +658,32 @@ class AIDecisionSystem:
             Array of calibrated confidence scores
         """
         import numpy as np
+
         # Get the device of the input tensor for later use
-        device = confidence_scores.device if hasattr(confidence_scores, 'device') else torch.device('cpu')
+        device = (
+            confidence_scores.device
+            if hasattr(confidence_scores, "device")
+            else torch.device("cpu")
+        )
         confidence_scores = np.array(confidence_scores.cpu())
+        # Replace NaN values with 0
+        confidence_scores = np.nan_to_num(confidence_scores, nan=0.0)
         mask_high = confidence_scores >= 0.5
         mask_low = confidence_scores < 0.5
         # Avoid division by zero and log(0)
-        confidence_scores = np.clip(confidence_scores, 1e-6, 1-1e-6)
-        
+        confidence_scores = np.clip(confidence_scores, 1e-6, 1 - 1e-6)
+
         # Apply different transformations based on value
         transformed_scores = np.zeros_like(confidence_scores, dtype=float)
-        transformed_scores[mask_high] = np.log(1/(1 - confidence_scores[mask_high]))
-        transformed_scores[mask_low] = np.log(2) - np.log(1/confidence_scores[mask_low])
-        
-        confidence_scores = transformed_scores
+        transformed_scores[mask_high] = np.log(1 / (1 - confidence_scores[mask_high]))
+        transformed_scores[mask_low] = np.log(2) - np.log(
+            1 / confidence_scores[mask_low]
+        )
+
+        # confidence_scores = transformed_scores
         confidence_scores_reshaped = np.array(confidence_scores).reshape(-1, 1)
-        
+
         # Predict probabilities (calibrated scores)
-        return torch.Tensor(calibration_model.predict_proba(confidence_scores_reshaped)[:, 1]).to(device)
+        return torch.Tensor(
+            calibration_model.predict(confidence_scores_reshaped)[:, 1]
+        ).to(device)

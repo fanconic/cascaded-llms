@@ -2,7 +2,7 @@ experiment: first #"first" runs the deferal experiment, "second" runs the online
 seed: 42
 results_dir: followup_results
 max_new_tokens: 512
-calibrate: false
+calibrate: true
 calibration_size: 100
 costs:
   output_input_price_ratio: 5
@@ -36,13 +36,13 @@ uncertainty_samples: 1
 precomputed:
   enable: true
   generation: true
-  verification: false
-  uncertainty: false
-  path: /home/azureuser/caf83/helm/results/run_20250427_224104_debug_arc_easy/results_debug.csv
+  verification: true
+  uncertainty: true
+  path: /home/azureuser/caf83/helm/followup_results/run_20250505_231438_first_qwen_arc_challenge
 dataset:
   name: allenai/ai2_arc
-  subset: ARC-Easy
+  subset: ARC-Challenge
   split: test
   num_samples: -1
-device: cuda:0
-name_postfix: first_qwen_arc_easy
+device: cuda:1
+name_postfix: first_qwen_arc_challenge_calibrated
