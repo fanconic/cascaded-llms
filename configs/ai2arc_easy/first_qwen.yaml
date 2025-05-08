@@ -36,9 +36,9 @@ uncertainty_samples: 1
 precomputed:
   enable: true
   generation: true
-  verification: false
-  uncertainty: false
-  path: /home/azureuser/caf83/helm/results/run_20250427_224104_debug_arc_easy/results_debug.csv
+  verification: true
+  uncertainty: true
+  path: /home/azureuser/caf83/helm/followup_results/run_20250505_231401_first_qwen_arc_easy
 dataset:
   name: allenai/ai2_arc
   subset: ARC-Easy

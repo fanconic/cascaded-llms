@@ -36,8 +36,8 @@ uncertainty_samples: 1
 precomputed:
   enable: true
   generation: true
-  verification: false
-  uncertainty: false
+  verification: true
+  uncertainty: true
   path: /home/azureuser/caf83/helm/results/run_20250428_073333_debug_llama_medqa/results_debug_llama_medqa.csv
 dataset:
   name: HuggingSara/medqa

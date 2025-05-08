@@ -4,8 +4,6 @@ results_dir: followup_results
 max_new_tokens: 512
 calibrate: true
 calibration_size: 100
-calibrate: true
-calibration_size: 100
 costs:
   output_input_price_ratio: 5
   base_gen_cost: 1.0
@@ -40,11 +38,11 @@ precomputed:
   generation: true
   verification: true
   uncertainty: true
-  path: /home/azureuser/caf83/helm/followup_results/run_20250505_231447_first_qwen_medqa
+  path: /home/azureuser/caf83/helm/followup_results/run_20250505_231456_first_qwen_medmcqa
 dataset:
-  name: allenai/ai2_arc
-  subset: ARC-Easy
-  split: test
+  name: openlifescienceai/medmcqa
+  subset: null
+  split: validation
   num_samples: -1
 device: cuda:0
-name_postfix: first_qwen_arc_easy_calibrated
+name_postfix: first_qwen_medmcqa_calibrated

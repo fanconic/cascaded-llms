@@ -38,7 +38,7 @@ precomputed:
   generation: true
   verification: true
   uncertainty: true
-  path: /home/azureuser/caf83/helm/results/run_20250428_073333_debug_llama_medqa/results_debug_llama_medqa.csv
+  path: /home/azureuser/caf83/helm/followup_results/run_20250506_105826_first_llama_medqa
 dataset:
   name: HuggingSara/medqa
   subset: 

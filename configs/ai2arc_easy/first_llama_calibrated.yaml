@@ -38,7 +38,7 @@ precomputed:
   generation: true
   verification: true
   uncertainty: true
-  path: /home/azureuser/caf83/helm/results/run_20250428_072842_debug_llama_arc_easy/results_debug_llama_arc_easy.csv
+  path: /home/azureuser/caf83/helm/followup_results/run_20250506_180133_first_llama_arc_easy
 dataset:
   name: allenai/ai2_arc
   subset: ARC-Easy

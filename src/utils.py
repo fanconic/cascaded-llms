@@ -166,7 +166,7 @@ def plot_accuracy_vs_cost_D1(
     experiment_data_list,  # List of tuples containing (experiment_name, metrics_dict)
     data_length,
 ):
-    plt.figure(figsize=(8, 7))  # Increased figure size for better visibility
+    plt.figure(figsize=(4, 5))  # Increased figure size for better visibility
     
     NAMES_DICT = {
         "self_verification_1_base" : "$\\text{SV}_{\\text{base}}$ ($n=1$)",
@@ -183,26 +183,44 @@ def plot_accuracy_vs_cost_D1(
     prop_cycle = plt.rcParams['axes.prop_cycle']
     colors = prop_cycle.by_key()['color']
 
-    # Plot base and large model points (only once since they're the same for all experiments)
+    # Define specific colors and markers for each experiment type
+    exp_styles = {
+        "Base Model": {"color": colors[0], "marker": "o"},
+        "Large Model": {"color": colors[1], "marker": "o"},
+        "self_verification_1_base": {"color": colors[2], "marker": "x"},
+        "self_verification_5_base": {"color": colors[2], "marker": "^"},
+        "surrogate_token_probs_1_base": {"color": colors[3], "marker": "x"},
+        "surrogate_token_probs_5_base": {"color": colors[3], "marker": "^"},
+        "self_verification_1_large": {"color": colors[4], "marker": "x"},
+        "self_verification_5_large": {"color": colors[4], "marker": "^"},
+        "surrogate_token_probs_1_large": {"color": colors[5], "marker": "x"},
+        "surrogate_token_probs_5_large": {"color": colors[5], "marker": "^"},
+    }
+
+    # Dictionary to store plot handles for each experiment
+    plot_handles = {}
+
+    # Plot base and large model points
     base_plot = plt.errorbar(
         experiment_data_list[0][1]["cost_base"] / data_length,
         experiment_data_list[0][1]["accuracy_base"],
         yerr=experiment_data_list[0][1]["accuracy_base_err"],
-        label="Base Model",
-        fmt="o",
+        fmt=exp_styles["Base Model"]["marker"],
         capsize=5,
-        color=colors[0]
+        color=exp_styles["Base Model"]["color"]
     )
+    plot_handles["Base Model"] = base_plot
+    
     large_plot = plt.errorbar(
         experiment_data_list[0][1]["cost_large"] / data_length,
         experiment_data_list[0][1]["accuracy_large"],
         yerr=experiment_data_list[0][1]["accuracy_large_err"],
-        label="Large Model",
-        fmt="o",
+        fmt=exp_styles["Large Model"]["marker"],
         capsize=5,
-        color=colors[1]
+        color=exp_styles["Large Model"]["color"]
     )
-
+    plot_handles["Large Model"] = large_plot
+    
     # Plot line between base and large model
     plt.plot(
         [
@@ -220,46 +238,54 @@ def plot_accuracy_vs_cost_D1(
 
     # Plot dynamic points for each experiment
     for experiment_name, metrics in experiment_data_list:
-        # Choose marker based on experiment name
-        if "1" in experiment_name:
-            marker = "x"
-        elif "5" in experiment_name:
-            marker = "^"
-        else:
-            marker = "s"  # Default square marker
-        
-        # Choose color based on verification method and model size
-        if "surrogate_token_probs" in experiment_name:
-            if "base" in experiment_name:
-                color = colors[2]
-            elif "large" in experiment_name:
-                color = colors[3]
-            else:
-                color = colors[4]  # Use third color from default cycle
-        elif "self_verification" in experiment_name:
-            if "base" in experiment_name:
-                color = colors[5]
-            elif "large" in experiment_name:
-                color = colors[6]
-            else:
-                color = colors[7]
-        else:
-            color = colors[8]
-            
-        plt.errorbar(
-            metrics["dynamic_cost"] / data_length,
-            metrics["dynamic_accuracy"],
-            yerr=metrics["dynamic_accuracy_err"],
-            label=NAMES_DICT[experiment_name],
-            fmt=marker,
-            capsize=5,
-            color=color
-        )
+        if experiment_name in exp_styles:
+            style = exp_styles[experiment_name]
+            exp_plot = plt.errorbar(
+                metrics["dynamic_cost"] / data_length,
+                metrics["dynamic_accuracy"],
+                yerr=metrics["dynamic_accuracy_err"],
+                fmt=style["marker"],
+                capsize=5,
+                color=style["color"]
+            )
+            plot_handles[experiment_name] = exp_plot
 
     plt.xlabel("Cost per Sample")
     plt.ylabel("Accuracy")
     plt.title("Accuracy vs Cost Comparison")
-    plt.legend(loc='upper center', bbox_to_anchor=(0.5, -0.1), ncol=5)  # Place legend at the bottom
+    
+    # Create legend handles and labels in the specific order requested
+    legend_order = [
+        # Row 1: Base and Large models
+        ["Base Model", "Large Model"],
+        # Row 2: SV base models
+        ["self_verification_1_base", "self_verification_5_base"],
+        # Row 3: STP base models
+        ["surrogate_token_probs_1_base", "surrogate_token_probs_5_base"],
+        # Row 4: SV large models
+        ["self_verification_1_large", "self_verification_5_large"],
+        # Row 5: STP large models
+        ["surrogate_token_probs_1_large", "surrogate_token_probs_5_large"]
+    ]
+    legend_order = list(map(list, zip(*legend_order)))
+    
+    # Create flat lists of handles and labels in the correct order
+    legend_handles = []
+    legend_labels = []
+    
+    for row in legend_order:
+        for item in row:
+            if item in plot_handles:
+                legend_handles.append(plot_handles[item])
+                if item == "Base Model" or item == "Large Model":
+                    legend_labels.append(item)
+                else:
+                    legend_labels.append(NAMES_DICT[item])
+    
+    # Create legend with 2 columns per row
+    plt.legend(legend_handles, legend_labels, loc='upper center', 
+               bbox_to_anchor=(0.5, -0.1), ncol=2)
+    
     plt.tight_layout()  # Adjust layout to prevent label cutoff
     plt.savefig(
         os.path.join(run_dir, "accuracy_vs_cost_combined.pdf"), bbox_inches="tight"

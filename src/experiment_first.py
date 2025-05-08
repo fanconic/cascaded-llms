@@ -118,6 +118,7 @@ class Experiment_first:
                         f"results_{name_postfix}_{experiment_name}.csv",
                     )
                     if os.path.exists(precomputed_path):
+                        print(f"reading {experiment_name}")
                         self.precomputed_dfs[experiment_name] = pd.read_csv(
                             precomputed_path
                         )
@@ -422,7 +423,15 @@ class Experiment_first:
             data = pd.DataFrame(self._create_dataframe_dict(result))
 
             # Cut away data that was used for calibration
-            data = data.iloc[self.cfg.calibration_size :]
+            data.to_csv(
+                os.path.join(
+                    self.run_dir,
+                    f"results_{self.cfg.name_postfix}_{experiment_name}.csv",
+                ),
+                index=False,
+            )
+            
+            #data = data.iloc[self.cfg.calibration_size :]
 
             # Calculate metrics for this experiment
             metrics = self._calculate_metrics(data)
@@ -431,13 +440,7 @@ class Experiment_first:
             experiment_data_list.append((experiment_name, metrics))
 
             # Save individual experiment results
-            data.to_csv(
-                os.path.join(
-                    self.run_dir,
-                    f"results_{self.cfg.name_postfix}_{experiment_name}.csv",
-                ),
-                index=False,
-            )
+            
 
         # Create combined plot
         plot_accuracy_vs_cost_D1(
