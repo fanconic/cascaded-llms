@@ -177,6 +177,10 @@ def plot_accuracy_vs_cost_D1(
         "self_verification_5_large" : "$\\text{SV}_{\\text{large}}$ ($n=5$)",
         "surrogate_token_probs_1_large" : "$\\text{STP}_{\\text{large}}$ ($n=1$)",
         "surrogate_token_probs_5_large" : "$\\text{STP}_{\\text{large}}$ ($n=5$)",
+        "self_verification_1_ensemble" : "$\\text{SV}_{\\text{ensemble}}$ ($n=1$)",
+        "self_verification_5_ensemble" : "$\\text{SV}_{\\text{ensemble}}$ ($n=5$)",
+        "surrogate_token_probs_1_ensemble" : "$\\text{STP}_{\\text{ensemble}}$ ($n=1$)",
+        "surrogate_token_probs_5_ensemble" : "$\\text{STP}_{\\text{ensemble}}$ ($n=5$)",
     }
     
     # Get the default color cycle from matplotlib
@@ -195,6 +199,10 @@ def plot_accuracy_vs_cost_D1(
         "self_verification_5_large": {"color": colors[4], "marker": "^"},
         "surrogate_token_probs_1_large": {"color": colors[5], "marker": "x"},
         "surrogate_token_probs_5_large": {"color": colors[5], "marker": "^"},
+        "self_verification_1_ensemble": {"color": colors[6], "marker": "x"},
+        "self_verification_5_ensemble": {"color": colors[6], "marker": "^"},
+        "surrogate_token_probs_1_ensemble": {"color": colors[0], "marker": "x"},
+        "surrogate_token_probs_5_ensemble": {"color": colors[0], "marker": "^"},
     }
 
     # Dictionary to store plot handles for each experiment
@@ -265,7 +273,11 @@ def plot_accuracy_vs_cost_D1(
         # Row 4: SV large models
         ["self_verification_1_large", "self_verification_5_large"],
         # Row 5: STP large models
-        ["surrogate_token_probs_1_large", "surrogate_token_probs_5_large"]
+        ["surrogate_token_probs_1_large", "surrogate_token_probs_5_large"],
+        # Row 6: SV ensemble models
+        # ["self_verification_1_ensemble", "self_verification_5_ensemble"],
+        # # Row 7: STP ensemble models
+        # ["surrogate_token_probs_1_ensemble", "surrogate_token_probs_5_ensemble"]
     ]
     legend_order = list(map(list, zip(*legend_order)))
     

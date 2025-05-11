@@ -32,7 +32,7 @@ class Experiment_first:
         self.dataset, self.dataset_length = self._load_dataset()
         self.preprocessor = get_preprocessor(cfg.dataset.name)
 
-        self.use_larger_models = [False, True]
+        self.use_larger_models = ["large", "base"] #, "ensemble"]
         self.number_of_repetition = [1, 5]
         self.verification_funcs = [self_verification, surrogate_token_probs]
 
@@ -58,6 +58,7 @@ class Experiment_first:
         for use_larger_model in self.use_larger_models:
             for func in self.verification_funcs:
                 for n in self.number_of_repetition:
+                    print("Test: ", use_larger_model)
                     exp_config = ExperimentConfig(
                         base_model=cfg.base_model,
                         large_model=cfg.large_model,
@@ -83,7 +84,7 @@ class Experiment_first:
                     )
                     self.decision_systems.append(decision_system)
                     self.experiment_names.append(
-                        f"{func.__name__}_{n}_{'large' if use_larger_model else 'base'}"
+                        f"{func.__name__}_{n}_{use_larger_model}"
                     )
 
         if self.cfg.precomputed.enable:
@@ -112,10 +113,12 @@ class Experiment_first:
                         if "_" in last_folder
                         else ""
                     )
-
+                    file_name = f"results_{name_postfix}_{experiment_name}.csv"
+                    if "ensemble" in experiment_name: 
+                        file_name = file_name.replace("ensemble", "large")
                     precomputed_path = os.path.join(
                         self.cfg.precomputed.path,
-                        f"results_{name_postfix}_{experiment_name}.csv",
+                        file_name,
                     )
                     if os.path.exists(precomputed_path):
                         print(f"reading {experiment_name}")
@@ -487,25 +490,68 @@ class Experiment_first:
 
         # Calculate Incremental Benefit-Cost (ICB - AutoMix)
         ibc_base2large = (accuracy_large - accuracy_base) / (cost_large - cost_base)
+        # Calculate standard error for ibc_base2large using error propagation
+        ibc_base2large_err = np.sqrt(
+            (accuracy_base_err / (cost_large - cost_base))**2 + 
+            (accuracy_large_err / (cost_large - cost_base))**2
+        )
+        
         ibc_base2model = (dynamic_accuracy - accuracy_base) / (dynamic_cost - cost_base)
+        # Calculate standard error for ibc_base2model
+        ibc_base2model_err = np.sqrt(
+            (accuracy_base_err / (dynamic_cost - cost_base))**2 + 
+            (dynamic_accuracy_err / (dynamic_cost - cost_base))**2
+        )
+        
         delta_ibc_base2large = (ibc_base2model - ibc_base2large) / ibc_base2large * 100
+        # Calculate standard error for delta_ibc_base2large
+        delta_ibc_base2large_err = np.sqrt(
+            (ibc_base2model_err / ibc_base2large)**2 + 
+            (ibc_base2large_err * ibc_base2model / ibc_base2large**2)**2
+        ) * 100
 
         ibc_base2lexpert = (1.0 - accuracy_base) / (
             self.cfg.costs.expert_cost * len(data) - cost_base
         )
+        # Calculate standard error for ibc_base2lexpert
+        ibc_base2lexpert_err = accuracy_base_err / (
+            self.cfg.costs.expert_cost * len(data) - cost_base
+        )
+        
         delta_ibc_base2lexpert = (
             (ibc_base2model - ibc_base2lexpert) / ibc_base2lexpert * 100
         )
+        # Calculate standard error for delta_ibc_base2lexpert
+        delta_ibc_base2lexpert_err = np.sqrt(
+            (ibc_base2model_err / ibc_base2lexpert)**2 + 
+            (ibc_base2lexpert_err * ibc_base2model / ibc_base2lexpert**2)**2
+        ) * 100
 
         ibc_large2expert = (1.0 - accuracy_large) / (
             self.cfg.costs.expert_cost * len(data) - cost_large
         )
+        # Calculate standard error for ibc_large2expert
+        ibc_large2expert_err = accuracy_large_err / (
+            self.cfg.costs.expert_cost * len(data) - cost_large
+        )
+        
         ibc_large2model = (dynamic_accuracy - accuracy_large) / (
             dynamic_cost - cost_large
         )
+        # Calculate standard error for ibc_large2model
+        ibc_large2model_err = np.sqrt(
+            (accuracy_large_err / (dynamic_cost - cost_large))**2 + 
+            (dynamic_accuracy_err / (dynamic_cost - cost_large))**2
+        )
+        
         delta_ibc_large2expert = (
             (ibc_large2model - ibc_large2expert) / ibc_large2expert * 100
         )
+        # Calculate standard error for delta_ibc_large2expert
+        delta_ibc_large2expert_err = np.sqrt(
+            (ibc_large2model_err / ibc_large2expert)**2 + 
+            (ibc_large2expert_err * ibc_large2model / ibc_large2expert**2)**2
+        ) * 100
 
         return {
             "accuracy_base": accuracy_base,
@@ -517,9 +563,22 @@ class Experiment_first:
             "cost_base": cost_base,
             "cost_large": cost_large,
             "dynamic_cost": dynamic_cost,
+            "ibc_base2large": ibc_base2large,
+            "ibc_base2large_err": ibc_base2large_err,
+            "ibc_base2model": ibc_base2model,
+            "ibc_base2model_err": ibc_base2model_err,
+            "ibc_base2lexpert": ibc_base2lexpert,
+            "ibc_base2lexpert_err": ibc_base2lexpert_err,
+            "ibc_large2expert": ibc_large2expert,
+            "ibc_large2expert_err": ibc_large2expert_err,
+            "ibc_large2model": ibc_large2model,
+            "ibc_large2model_err": ibc_large2model_err,
             "dibc_base2large": delta_ibc_base2large,
+            "dibc_base2large_err": delta_ibc_base2large_err,
             "dibc_base2expert": delta_ibc_base2lexpert,
+            "dibc_base2expert_err": delta_ibc_base2lexpert_err,
             "dibc_large2expert": delta_ibc_large2expert,
+            "dibc_large2expert_err": delta_ibc_large2expert_err,
         }
 
     def _calibrate_confidence_scores(self, confidence_scores, correctness):

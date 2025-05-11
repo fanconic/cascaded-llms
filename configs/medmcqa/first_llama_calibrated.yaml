@@ -40,9 +40,9 @@ precomputed:
   uncertainty: true
   path: /home/azureuser/caf83/helm/followup_results/run_20250506_231520_first_llama_medmcqa
 dataset:
-  name: allenai/ai2_arc
-  subset: ARC-Easy
-  split: test
+  name: openlifescienceai/medmcqa
+  subset: null
+  split: validation
   num_samples: -1
 device: cuda:0
 name_postfix: first_llama_medmcqa_calibrated

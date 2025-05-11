@@ -252,12 +252,17 @@ class AIDecisionSystem:
     ) -> Tuple[int, str, float]:
         """Make a decision for a single prompt."""
 
-        if use_larger_model:
+        if use_larger_model == "large":
             acceptance_probability = large_prob
             first_inf_cost = large_inf_cost
-        else:
+        elif use_larger_model == "base":
             acceptance_probability = base_prob
             first_inf_cost = base_inf_cost
+        elif use_larger_model == "ensemble":
+            acceptance_probability = 1/(1+np.exp(-(3.44 * base_prob + 7.39 * large_prob)))
+            first_inf_cost = base_inf_cost + large_inf_cost
+        else:
+            raise NotImplementedError(f"Not implemented {use_larger_model}")
 
         u = random.random()
         if u < acceptance_probability:

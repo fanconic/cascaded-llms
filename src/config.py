@@ -19,7 +19,7 @@ class ModelConfig:
     prompt_template: str = ""
     uncertainty_samples: int = 1
     batch_size: int = 5
-    use_larger_model: bool = True
+    use_larger_model: str = "base"
 
 
 @dataclass
@@ -45,7 +45,7 @@ class ExperimentConfig:
     max_input_length: int
     max_new_tokens: int
     device: str
-    use_larger_model: bool
+    use_larger_model: str
     precomputed: Dict
     uncertainty_samples: int = 1
     batch_size: int = 5
