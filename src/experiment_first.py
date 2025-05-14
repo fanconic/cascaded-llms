@@ -14,6 +14,11 @@ from src.config import ExperimentConfig
 from src.factory import DecisionMakerFactory
 from src.preprocessor import get_preprocessor
 from src.verification import self_verification, surrogate_token_probs
+from sklearn.neural_network import MLPClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.isotonic import IsotonicRegression
+     
 
 from transformers import (
     AutoTokenizer,
@@ -32,7 +37,7 @@ class Experiment_first:
         self.dataset, self.dataset_length = self._load_dataset()
         self.preprocessor = get_preprocessor(cfg.dataset.name)
 
-        self.use_larger_models = ["large", "base"] #, "ensemble"]
+        self.use_larger_models = ["base", "large"] #, "ensemble"]
         self.number_of_repetition = [1, 5]
         self.verification_funcs = [self_verification, surrogate_token_probs]
 
@@ -270,6 +275,7 @@ class Experiment_first:
                 base_calibration_model=base_calibration_model,
                 large_on_small_calibration_model=large_on_small_calibration_model,
                 large_calibration_model=large_calibration_model,
+                skip_risk = (len(calibration_data) < self.cfg.calibration_size) & self.cfg.calibrate,
             )
 
             # Data is appended to the collectors
@@ -306,20 +312,20 @@ class Experiment_first:
                     calib_df = pd.DataFrame(calibration_data)
 
                     # Calibrate base model probabilities
-                    base_calibration_model = self._calibrate_confidence_scores(
+                    base_calibration_model = self._calibrate_confidence_scores_bayesian(
                         calib_df["base_prob"].values, calib_df["base_correct"].values
                     )
 
                     # Calibrate large model probabilities
                     large_on_small_calibration_model = (
-                        self._calibrate_confidence_scores(
+                        self._calibrate_confidence_scores_bayesian(
                             calib_df["large_prob"].values,
                             calib_df["base_correct"].values,
                         )
                     )
 
                     # Calibrate large model probabilities
-                    large_calibration_model = self._calibrate_confidence_scores(
+                    large_calibration_model = self._calibrate_confidence_scores_bayesian(
                         calib_df["large_uncert"].values,
                         calib_df["large_correct"].values,
                     )
@@ -437,14 +443,13 @@ class Experiment_first:
             #data = data.iloc[self.cfg.calibration_size :]
 
             # Calculate metrics for this experiment
-            metrics = self._calculate_metrics(data)
+            metrics = self._calculate_metrics(data.iloc[self.cfg.calibration_size :])
             metrics["experiment_name"] = experiment_name
             all_metrics.append(metrics)
             experiment_data_list.append((experiment_name, metrics))
 
             # Save individual experiment results
             
-
         # Create combined plot
         plot_accuracy_vs_cost_D1(
             self.run_dir,
@@ -509,31 +514,6 @@ class Experiment_first:
             (ibc_base2model_err / ibc_base2large)**2 + 
             (ibc_base2large_err * ibc_base2model / ibc_base2large**2)**2
         ) * 100
-
-        ibc_base2lexpert = (1.0 - accuracy_base) / (
-            self.cfg.costs.expert_cost * len(data) - cost_base
-        )
-        # Calculate standard error for ibc_base2lexpert
-        ibc_base2lexpert_err = accuracy_base_err / (
-            self.cfg.costs.expert_cost * len(data) - cost_base
-        )
-        
-        delta_ibc_base2lexpert = (
-            (ibc_base2model - ibc_base2lexpert) / ibc_base2lexpert * 100
-        )
-        # Calculate standard error for delta_ibc_base2lexpert
-        delta_ibc_base2lexpert_err = np.sqrt(
-            (ibc_base2model_err / ibc_base2lexpert)**2 + 
-            (ibc_base2lexpert_err * ibc_base2model / ibc_base2lexpert**2)**2
-        ) * 100
-
-        ibc_large2expert = (1.0 - accuracy_large) / (
-            self.cfg.costs.expert_cost * len(data) - cost_large
-        )
-        # Calculate standard error for ibc_large2expert
-        ibc_large2expert_err = accuracy_large_err / (
-            self.cfg.costs.expert_cost * len(data) - cost_large
-        )
         
         ibc_large2model = (dynamic_accuracy - accuracy_large) / (
             dynamic_cost - cost_large
@@ -544,14 +524,6 @@ class Experiment_first:
             (dynamic_accuracy_err / (dynamic_cost - cost_large))**2
         )
         
-        delta_ibc_large2expert = (
-            (ibc_large2model - ibc_large2expert) / ibc_large2expert * 100
-        )
-        # Calculate standard error for delta_ibc_large2expert
-        delta_ibc_large2expert_err = np.sqrt(
-            (ibc_large2model_err / ibc_large2expert)**2 + 
-            (ibc_large2expert_err * ibc_large2model / ibc_large2expert**2)**2
-        ) * 100
 
         return {
             "accuracy_base": accuracy_base,
@@ -567,18 +539,10 @@ class Experiment_first:
             "ibc_base2large_err": ibc_base2large_err,
             "ibc_base2model": ibc_base2model,
             "ibc_base2model_err": ibc_base2model_err,
-            "ibc_base2lexpert": ibc_base2lexpert,
-            "ibc_base2lexpert_err": ibc_base2lexpert_err,
-            "ibc_large2expert": ibc_large2expert,
-            "ibc_large2expert_err": ibc_large2expert_err,
             "ibc_large2model": ibc_large2model,
             "ibc_large2model_err": ibc_large2model_err,
             "dibc_base2large": delta_ibc_base2large,
             "dibc_base2large_err": delta_ibc_base2large_err,
-            "dibc_base2expert": delta_ibc_base2lexpert,
-            "dibc_base2expert_err": delta_ibc_base2lexpert_err,
-            "dibc_large2expert": delta_ibc_large2expert,
-            "dibc_large2expert_err": delta_ibc_large2expert_err,
         }
 
     def _calibrate_confidence_scores(self, confidence_scores, correctness):
@@ -592,9 +556,7 @@ class Experiment_first:
         Returns:
             Fitted sklearn.linear_model.LogisticRegression model
         """
-        from sklearn.linear_model import LogisticRegression
-        from sklearn.isotonic import IsotonicRegression
-        import numpy as np
+        
 
         # Reshape confidence scores for sklearn --> Zelliger & Thomson transformation
         # Handle edge cases for p=0 and p=1
@@ -618,13 +580,84 @@ class Experiment_first:
 
         confidence_scores = transformed_scores
         confidence_scores_reshaped = np.array(confidence_scores).reshape(-1, 1)
+        
+        scaler = StandardScaler()
+        confidence_scores_scaled = scaler.fit_transform(confidence_scores_reshaped)
 
         # Initialize and fit logistic regression model (Platt scaling)
         model = LogisticRegression(C=1.0, solver="lbfgs")
-        model.fit(confidence_scores_reshaped, correctness)
+        model.fit(confidence_scores_scaled, correctness)
 
         # Initialize and fit isotonic regression model
         # model = IsotonicRegression(out_of_bounds="clip")
         # model.fit(confidence_scores_reshaped, correctness)
 
-        return model
+        return {
+            "model": model,
+            "scaler": scaler
+        }
+    
+        
+    def _calibrate_confidence_scores_bayesian(self, confidence_scores, correctness):
+        """
+        Calibrate confidence scores using Bayesian Logistic Regression.
+        
+        This method allows for uncertainty quantification through posterior sampling.
+
+        Args:
+            confidence_scores: Array of model confidence scores
+            correctness: Binary array indicating whether predictions were correct
+
+        Returns:
+            Fitted PyMC Bayesian Logistic Regression model that can be used for
+            posterior predictive sampling
+        """
+        import numpy as np
+        import pymc as pm
+        import arviz as az
+        
+        # Reshape confidence scores for PyMC
+        confidence_scores = np.array(confidence_scores)
+        
+        # Replace NaN values with 0
+        confidence_scores = np.nan_to_num(confidence_scores, nan=0.0)
+        
+        mask_high = confidence_scores >= 0.5
+        mask_low = confidence_scores < 0.5
+
+        # Avoid division by zero and log(0)
+        confidence_scores = np.clip(confidence_scores, 1e-6, 1 - 1e-6)
+
+        # Apply different transformations based on value
+        transformed_scores = np.zeros_like(confidence_scores, dtype=float)
+        transformed_scores[mask_high] = np.log(1 / (1 - confidence_scores[mask_high]))
+        transformed_scores[mask_low] = np.log(2) - np.log(
+            1 / confidence_scores[mask_low]
+        )
+
+        confidence_scores = transformed_scores
+        
+        # Prepare data
+        X = confidence_scores
+        y = np.array(correctness)
+        
+        # Build Bayesian Logistic Regression model
+        with pm.Model() as model:
+            # Priors for intercept and coefficient
+            x = pm.MutableData("x", X)
+            alpha = pm.Normal("alpha", mu=0, sigma=10)
+            beta = pm.Normal("beta", mu=0, sigma=10)
+            p = pm.Deterministic("p", pm.math.invlogit(beta*x + alpha))
+            
+            # Likelihood (logistic)
+            pm.Bernoulli("y", p=p, observed=y)
+            
+            # Sample from the posterior
+            trace = pm.sample(1000, tune=1000, return_inferencedata=True, random_seed=42)
+        
+        return {
+            "model": model,
+            "trace": trace,
+            "X": X,
+            "y": y
+        }

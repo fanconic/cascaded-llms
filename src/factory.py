@@ -31,9 +31,9 @@ class DecisionMakerFactory:
 
         online_config_obj = OnlineConfig(
             enable=online_config.enable,
-            initial_uncertainty_threshold_base=online_config.initial_uncertainty_threshold_base,
-            initial_uncertainty_threshold_large=online_config.initial_uncertainty_threshold_large,
-            initial_M=online_config.initial_M,
+            initial_xi_base=online_config.initial_xi_base,
+            initial_xi_large=online_config.initial_xi_large,
+            initial_phi_base=online_config.initial_phi_base,
             lr_tau=online_config.lr_tau,
             lr_M=online_config.lr_M,
             error_penalty=online_config.error_penalty,

@@ -25,13 +25,9 @@ class ModelConfig:
 @dataclass
 class CostConfig:
     """Configuration for different operation costs."""
-
-    base_gen_cost: float
-    large_gen_cost: float
-    large_inf_cost: float
-    expert_cost: float
-    mistake_cost: float
     output_input_price_ratio: float
+    abst_lambda: float
+    cost_lambda: float
 
 
 @dataclass
@@ -56,9 +52,9 @@ class OnlineConfig:
     """Configuration for online learning."""
 
     enable: bool
-    initial_uncertainty_threshold_base: float
-    initial_uncertainty_threshold_large: float
-    initial_M: float
+    initial_xi_base: float
+    initial_xi_large: float
+    initial_phi_base: float
     lr_tau: float
     lr_M: float
     error_penalty: float

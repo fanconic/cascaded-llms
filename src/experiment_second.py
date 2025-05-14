@@ -1,6 +1,6 @@
 import os
 import datetime
-from typing import Dict
+from typing import Dict, Tuple, List
 
 import numpy as np
 import pandas as pd
@@ -9,16 +9,21 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from src.utils import (
-    plot_accuracy_vs_cost,
-    plot_decision_distribution,
-    plot_tau_M,
-    plot_accuracy_vs_cost_D1,
-    plot_risk_and_cumulative_risk,
-)
+from src.utils import plot_decision_distribution, plot_risk_and_cumulative_risk, plot_tau_M
 from src.config import ExperimentConfig
 from src.factory import DecisionMakerFactory
 from src.preprocessor import get_preprocessor
+from src.verification import surrogate_token_probs
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+     
+
+from transformers import (
+    AutoTokenizer,
+    AutoModelForCausalLM,
+    PreTrainedModel,
+    PreTrainedTokenizer,
+)
 
 
 class Experiment_second:
@@ -30,27 +35,103 @@ class Experiment_second:
         self.dataset, self.dataset_length = self._load_dataset()
         self.preprocessor = get_preprocessor(cfg.dataset.name)
 
-        exp_config = ExperimentConfig(
-            base_model=cfg.base_model,
-            large_model=cfg.large_model,
-            verification_fn=cfg.verification_fn,
-            uncertainty_fn=cfg.uncertainty_fn,
-            max_input_length=cfg.max_input_length,
-            max_new_tokens=cfg.max_new_tokens,
-            device=cfg.device,
-            precomputed=cfg.precomputed,
-            uncertainty_samples=cfg.uncertainty_samples,
-            batch_size=cfg.batch_size,
-        )
+        self.use_larger_models = ["large"]
+        self.number_of_repetition = [1]
+        self.verification_funcs = [surrogate_token_probs]
 
-        self.decision_system = DecisionMakerFactory.create_decision_maker(
-            exp_config, cfg.online, cfg.costs
-        )
+        # Initialize models
+        if not (
+            self.cfg.precomputed.generation
+            and self.cfg.precomputed.verification
+            and self.cfg.precomputed.uncertainty
+        ):
+            self.base_model, self.base_tokenizer = self._initialize_model(
+                self.cfg.base_model, "Small"
+            )
+            self.large_model, self.large_tokenizer = self._initialize_model(
+                self.cfg.large_model, "Large"
+            )
+        else:
+            print("Generations have been precomputed")
+            self.base_model, self.base_tokenizer = None, None
+            self.large_model, self.large_tokenizer = None, None
 
-        self.sft_trainers = self._initialize_sft() if cfg.sft.enable else None
+        self.decision_systems = []
+        self.experiment_names = []
+        for use_larger_model in self.use_larger_models:
+            for func in self.verification_funcs:
+                for n in self.number_of_repetition:
+                    print("Test: ", use_larger_model)
+                    exp_config = ExperimentConfig(
+                        base_model=cfg.base_model,
+                        large_model=cfg.large_model,
+                        verification_fn=func,
+                        uncertainty_fn=func,
+                        max_input_length=cfg.max_input_length,
+                        max_new_tokens=cfg.max_new_tokens,
+                        device=cfg.device,
+                        precomputed=cfg.precomputed,
+                        uncertainty_samples=n,
+                        batch_size=cfg.batch_size,
+                        use_larger_model=use_larger_model,
+                    )
+
+                    decision_system = DecisionMakerFactory.create_decision_maker(
+                        self.base_model,
+                        self.base_tokenizer,
+                        self.large_model,
+                        self.large_tokenizer,
+                        exp_config,
+                        cfg.online,
+                        cfg.costs,
+                    )
+                    self.decision_systems.append(decision_system)
+                    self.experiment_names.append(
+                        f"{func.__name__}_{n}_{use_larger_model}"
+                    )
 
         if self.cfg.precomputed.enable:
-            self.precomputed_df = pd.read_csv(self.cfg.precomputed.path)
+            self.precomputed_dfs = {}
+            for experiment_name in self.experiment_names:
+                # Check if the path is a CSV file or a directory
+                if self.cfg.precomputed.path.endswith(".csv"):
+                    # If it's a CSV file, read it for each experiment name
+                    precomputed_path = self.cfg.precomputed.path
+                    if os.path.exists(precomputed_path):
+                        self.precomputed_dfs[experiment_name] = pd.read_csv(
+                            precomputed_path
+                        )
+                    else:
+                        raise FileNotFoundError(
+                            f"Precomputed results file not found at {precomputed_path}"
+                        )
+                else:
+                    # If it's a directory, use the original log
+                    # Extract name_postfix from the last folder in precomputed.path
+                    last_folder = os.path.basename(
+                        os.path.normpath(self.cfg.precomputed.path)
+                    )
+                    name_postfix = (
+                        "_".join(last_folder.split("_")[3:])
+                        if "_" in last_folder
+                        else ""
+                    )
+                    file_name = f"results_{name_postfix}_{experiment_name}.csv"
+                    if "ensemble" in experiment_name: 
+                        file_name = file_name.replace("ensemble", "large")
+                    precomputed_path = os.path.join(
+                        self.cfg.precomputed.path,
+                        file_name,
+                    )
+                    if os.path.exists(precomputed_path):
+                        print(f"reading {experiment_name}")
+                        self.precomputed_dfs[experiment_name] = pd.read_csv(
+                            precomputed_path
+                        )
+                    else:
+                        raise FileNotFoundError(
+                            f"Precomputed results file not found for experiment {experiment_name} at {precomputed_path}"
+                        )
 
     def _load_dataset(self):
         if self.cfg.dataset.subset:
@@ -81,19 +162,41 @@ class Experiment_second:
         """Execute the experiment and collect results."""
         # Apply preprocessing
         preprocessed_data = self.preprocessor.preprocess(self.dataset, self.cfg)
+
         dataloader = DataLoader(
             preprocessed_data, batch_size=self.cfg.batch_size, shuffle=False
         )
 
-        results = self._collect_results(dataloader)
+        results = []
+        for experiment_name, decision_system in zip(
+            self.experiment_names, self.decision_systems
+        ):
+            print(f"Decision System: {experiment_name}")
+            result = self._collect_results(
+                dataloader,
+                decision_system=decision_system,
+                experiment_name=experiment_name,
+            )
+            results.append((experiment_name, result))
+
         self._analyze_and_save_results(results)
 
-        if self.sft_trainers:
-            base_trainer, large_trainer = self.sft_trainers
-            base_trainer.finalize()
-            large_trainer.finalize()
+    def _initialize_model(
+        self, model_path: str, model_name: str
+    ) -> Tuple[PreTrainedModel, PreTrainedTokenizer]:
+        """Initialize a model and its tokenizer."""
+        print(f"Loading {model_name} Model: {model_path}")
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.padding_side = "left"
 
-    def _collect_results(self, dataloader: DataLoader) -> Dict:
+        model = AutoModelForCausalLM.from_pretrained(model_path).to(self.cfg.device)
+        return model, tokenizer
+
+    def _collect_results(
+        self, dataloader: DataLoader, decision_system, experiment_name
+    ) -> Dict:
         collectors = {
             "questions": [],
             "decisions": [],
@@ -104,13 +207,13 @@ class Experiment_second:
             "base_predictions": [],
             "large_predictions": [],
             "labels": [],
-            # MvM defferal
+            # defferal
             "u": [],
             "M": [],
             "acceptance_ratios": [],
             "base_prob": [],
             "large_prob": [],
-            # MvH defferal
+            # abstention
             "uncerts": [],
             "base_uncerts": [],
             "large_uncerts": [],
@@ -134,9 +237,14 @@ class Experiment_second:
 
         precomputed_batch = None
         batch_idx = 0
+        calibration_data = []
+        base_calibration_model = None
+        large_calibration_model = None
+        large_on_small_calibration_model = None
+
         for batch in tqdm(dataloader):
             if self.cfg.precomputed.enable:
-                precomputed_batch = self.precomputed_df.loc[
+                precomputed_batch = self.precomputed_dfs[experiment_name].loc[
                     batch_idx : batch_idx + len(batch["answer"]) - 1,
                     [
                         "base_response",
@@ -157,18 +265,72 @@ class Experiment_second:
                 ]
                 batch_idx += len(batch["answer"])
 
-            batch_decisions = self.decision_system.decide_batch(
+            batch_decisions = decision_system.decide_batch(
                 batch["prompts"],
                 batch["answer"],
                 batch["questions"],
                 precomputed_batch=precomputed_batch,
+                base_calibration_model=base_calibration_model,
+                large_on_small_calibration_model=large_on_small_calibration_model,
+                large_calibration_model=large_calibration_model,
+                skip_risk = (len(calibration_data) < self.cfg.calibration_size) & self.cfg.calibrate,
             )
 
+            # Data is appended to the collectors
             self._process_batch_results(
                 batch_decisions,
                 batch,
                 collectors,
             )
+
+            # Collect data for calibration
+            if (
+                base_calibration_model is None
+                and large_calibration_model is None
+                and large_on_small_calibration_model is None
+                and self.cfg.calibrate
+            ):
+                for i, decision in enumerate(batch_decisions):
+                    calibration_data.append(
+                        {
+                            "base_prob": decision["base_probs"],
+                            "large_prob": decision["large_probs"],
+                            "large_uncert": decision["large_uncertainty"],
+                            "base_correct": decision["base_prediction"]
+                            == batch["answer"][i],
+                            "large_correct": decision["large_prediction"]
+                            == batch["answer"][i],
+                        }
+                    )
+
+                # After collecting n samples, calibrate the probabilities
+                if len(calibration_data) >= self.cfg.calibration_size:
+                    import pandas as pd
+
+                    calib_df = pd.DataFrame(calibration_data)
+
+                    # Calibrate base model probabilities
+                    base_calibration_model = self._calibrate_confidence_scores_bayesian(
+                        calib_df["base_prob"].values, calib_df["base_correct"].values
+                    )
+
+                    # Calibrate large model probabilities
+                    large_on_small_calibration_model = (
+                        self._calibrate_confidence_scores_bayesian(
+                            calib_df["large_prob"].values,
+                            calib_df["base_correct"].values,
+                        )
+                    )
+
+                    # Calibrate large model probabilities
+                    large_calibration_model = self._calibrate_confidence_scores_bayesian(
+                        calib_df["large_uncert"].values,
+                        calib_df["large_correct"].values,
+                    )
+
+                    print(
+                        f"Calibration models created after {self.cfg.calibration_size} samples"
+                    )
 
         return collectors
 
@@ -259,568 +421,157 @@ class Experiment_second:
             "system_risk_static": collectors["system_risk_static"],
         }
 
-    def _analyze_and_save_results(self, results: Dict):
-        # Create DataFrame from results
-        data = pd.DataFrame(self._create_dataframe_dict(results))
+    def _analyze_and_save_results(self, results: List[Dict]):
 
-        # # Calibrate confidence scores using a small subset of the data
-        # calibration_size = min(200, len(data))  # Use at most 100 samples for calibration
-        # calibration_subset = data.sample(n=calibration_size, random_state=42)
+        for experiment_name, result in results:
+            data = pd.DataFrame(self._create_dataframe_dict(result))
 
-        # # Calibrate base model probabilities
-        # base_calibration = self._calibrate_confidence_scores(
-        #     calibration_subset["base_prob"].values,
-        #     (calibration_subset["base_prediction"] == calibration_subset["label"]).values
-        # )
+            # Cut away data that was used for calibration
+            data.to_csv(
+                os.path.join(
+                    self.run_dir,
+                    f"results_{self.cfg.name_postfix}_{experiment_name}.csv",
+                ),
+                index=False,
+            )
+            
+            data = data.iloc[self.cfg.calibration_size :]
 
-        # # Calibrate large model probabilities
-        # large_calibration = self._calibrate_confidence_scores(
-        #     calibration_subset["large_prob"].values,
-        #     (calibration_subset["large_prediction"] == calibration_subset["label"]).values
-        # )
+            plot_decision_distribution(
+                self.run_dir, data["decision"], ["Base Model", "Large Model", "Abstention"]
+            )
 
-        # # Apply calibration to the full dataset
-        # data["base_prob"] = self._apply_calibration(data["base_prob"].values, base_calibration)
-        # data["large_prob"] = self._apply_calibration(data["large_prob"].values, large_calibration)
+            plot_tau_M(
+                self.run_dir,
+                data[["tau_base", "M", "tau_large"]],
+            )
 
-        # data["acceptance_ratios"] = data["large_prob"] / (data["base_prob"] * data["M"])
-        # data["decision"] = data.apply(lambda x: 0 if x["acceptance_ratios"] > x["u"] else 1, axis=1)
-        # data["cost"] = data.apply(lambda x: self.cfg.costs.base_gen_cost + self.cfg.costs.large_inf_cost if x["acceptance_ratios"] > x["u"] else self.cfg.costs.base_gen_cost + self.cfg.costs.large_inf_cost + self.cfg.costs.large_gen_cost, axis=1)
+            plot_risk_and_cumulative_risk(
+                self.run_dir,
+                data[
+                    [
+                        "system_risk",
+                        "system_risk_base",
+                        "system_risk_large",
+                        "system_risk_static",
+                        "system_risk_expert",
+                        "M",
+                    ]
+                ],
+            )
 
-        self._calculate_and_plot_metrics(data)
-        data.to_csv(
-            os.path.join(self.run_dir, f"results_{self.cfg.name_postfix}.csv"),
-            index=False,
-        )
+    
 
     def _calibrate_confidence_scores(self, confidence_scores, correctness):
         """
-        Calibrate confidence scores using isotonic regression.
+        Calibrate confidence scores using Platt scaling.
 
         Args:
             confidence_scores: Array of model confidence scores
             correctness: Binary array indicating whether predictions were correct
 
         Returns:
-            Fitted sklearn.isotonic.IsotonicRegression model
+            Fitted sklearn.linear_model.LogisticRegression model
         """
-        from sklearn.isotonic import IsotonicRegression
+        
 
-        # Initialize and fit isotonic regression model
-        ir = IsotonicRegression(out_of_bounds="clip")
-        ir.fit(confidence_scores, correctness)
+        # Reshape confidence scores for sklearn --> Zelliger & Thomson transformation
+        # Handle edge cases for p=0 and p=1
+        confidence_scores = np.array(confidence_scores)
 
-        return ir
+        # Replace NaN values with 0
+        confidence_scores = np.nan_to_num(confidence_scores, nan=0.0)
 
-    def _apply_calibration(self, confidence_scores, calibration_model):
+        mask_high = confidence_scores >= 0.5
+        mask_low = confidence_scores < 0.5
+
+        # Avoid division by zero and log(0)
+        confidence_scores = np.clip(confidence_scores, 1e-6, 1 - 1e-6)
+
+        # Apply different transformations based on value
+        transformed_scores = np.zeros_like(confidence_scores, dtype=float)
+        transformed_scores[mask_high] = np.log(1 / (1 - confidence_scores[mask_high]))
+        transformed_scores[mask_low] = np.log(2) - np.log(
+            1 / confidence_scores[mask_low]
+        )
+
+        confidence_scores = transformed_scores
+        confidence_scores_reshaped = np.array(confidence_scores).reshape(-1, 1)
+        
+        scaler = StandardScaler()
+        confidence_scores_scaled = scaler.fit_transform(confidence_scores_reshaped)
+
+        # Initialize and fit logistic regression model (Platt scaling)
+        model = LogisticRegression(C=1.0, solver="lbfgs")
+        model.fit(confidence_scores_scaled, correctness)
+
+
+        return {
+            "model": model,
+            "scaler": scaler
+        }
+
+        
+    def _calibrate_confidence_scores_bayesian(self, confidence_scores, correctness):
         """
-        Apply calibration model to confidence scores.
+        Calibrate confidence scores using Bayesian Logistic Regression.
+        
+        This method allows for uncertainty quantification through posterior sampling.
 
         Args:
             confidence_scores: Array of model confidence scores
-            calibration_model: Fitted calibration model
+            correctness: Binary array indicating whether predictions were correct
 
         Returns:
-            Array of calibrated confidence scores
+            Fitted PyMC Bayesian Logistic Regression model that can be used for
+            posterior predictive sampling
         """
-        return calibration_model.predict(confidence_scores)
+        import numpy as np
+        import pymc as pm
+        import arviz as az
+        
+        # Reshape confidence scores for PyMC
+        confidence_scores = np.array(confidence_scores)
+        
+        # Replace NaN values with 0
+        confidence_scores = np.nan_to_num(confidence_scores, nan=0.0)
+        
+        mask_high = confidence_scores >= 0.5
+        mask_low = confidence_scores < 0.5
 
-    def _calculate_and_plot_metrics(self, data: pd.DataFrame) -> None:
-        """Calculate accuracy metrics and generate plots."""
-        # Calculate base and large model accuracies
-        small_model_correct = [
-            label == pred for label, pred in zip(data["label"], data["base_prediction"])
-        ]
-        large_model_correct = [
-            label == pred
-            for label, pred in zip(data["label"], data["large_prediction"])
-        ]
+        # Avoid division by zero and log(0)
+        confidence_scores = np.clip(confidence_scores, 1e-6, 1 - 1e-6)
 
-        # Calculate accuracies and errors
-        accuracy_base = np.mean(small_model_correct)
-        accuracy_base_err = np.std(small_model_correct) / np.sqrt(
-            len(small_model_correct)
-        )
-        accuracy_large = np.mean(large_model_correct)
-        accuracy_large_err = np.std(large_model_correct) / np.sqrt(
-            len(large_model_correct)
-        )
-
-        # Calculate costs
-        cost_base = data["base_gen_cost"].sum()
-        cost_large = data["large_gen_cost"].sum()
-
-        # Calculate dynamic system metrics
-        data["correct"] = (data["prediction"] == data["label"]).astype(int)
-        dynamic_accuracy = data["correct"].mean()
-        dynamic_accuracy_err = data["correct"].std() / np.sqrt(len(data["correct"]))
-        dynamic_cost = data["cost"].sum()
-
-        # Calculate Incremental Benefit-Cost (ICB - AutoMix)
-        # We will have three delta ICB scores, base-large, base-expert, large-expert
-        ibc_base2large = (accuracy_large - accuracy_base) / (cost_large - cost_base)
-        ibc_base2model = (dynamic_accuracy - accuracy_base) / (dynamic_cost - cost_base)
-        delta_ibc_base2large = (ibc_base2model - ibc_base2large) / ibc_base2large * 100
-
-        ibc_base2lexpert = (1.0 - accuracy_base) / (
-            self.cfg.costs.expert_cost * len(data) - cost_base
-        )
-        delta_ibc_base2lexpert = (
-            (ibc_base2model - ibc_base2lexpert) / ibc_base2lexpert * 100
+        # Apply different transformations based on value
+        transformed_scores = np.zeros_like(confidence_scores, dtype=float)
+        transformed_scores[mask_high] = np.log(1 / (1 - confidence_scores[mask_high]))
+        transformed_scores[mask_low] = np.log(2) - np.log(
+            1 / confidence_scores[mask_low]
         )
 
-        ibc_large2expert = (1.0 - accuracy_large) / (
-            self.cfg.costs.expert_cost * len(data) - cost_large
-        )
-        ibc_large2model = (dynamic_accuracy - accuracy_large) / (
-            dynamic_cost - cost_large
-        )
-        delta_ibc_large2expert = (
-            (ibc_large2model - ibc_large2expert) / ibc_large2expert * 100
-        )
-
-        # System risk:
-        system_risk = data["system_risk"].mean()
-        system_risk_base = data["system_risk_base"].mean()
-        system_risk_large = data["system_risk_large"].mean()
-        system_risk_expert = data["system_risk_expert"].mean()
-        system_risk_static = data["system_risk_static"].mean()
-
-        # Generate plots
-        plot_accuracy_vs_cost(
-            self.run_dir,
-            cost_base,
-            accuracy_base,
-            accuracy_base_err,
-            cost_large,
-            accuracy_large,
-            accuracy_large_err,
-            self.cfg.costs.expert_cost,
-            len(data),
-            dynamic_cost,
-            dynamic_accuracy,
-            dynamic_accuracy_err,
-        )
-
-        plot_accuracy_vs_cost_D1(
-            self.run_dir,
-            cost_base,
-            accuracy_base,
-            accuracy_base_err,
-            cost_large,
-            accuracy_large,
-            accuracy_large_err,
-            len(data),
-            dynamic_cost,
-            dynamic_accuracy,
-            dynamic_accuracy_err,
-            delta_ibc_base2large,
-        )
-
-        plot_decision_distribution(
-            self.run_dir, data["decision"], ["Base Model", "Large Model", "Expert"]
-        )
-
-        plot_tau_M(
-            self.run_dir,
-            data[["tau_base", "tau_large", "M"]],
-        )
-
-        plot_risk_and_cumulative_risk(
-            self.run_dir,
-            data[
-                [
-                    "system_risk",
-                    "system_risk_base",
-                    "system_risk_large",
-                    "system_risk_static",
-                    "system_risk_expert",
-                    "M",
-                ]
-            ],
-        )
-
-        # Save metrics
-        metrics = {
-            "accuracy_base": accuracy_base,
-            "accuracy_base_err": accuracy_base_err,
-            "accuracy_large": accuracy_large,
-            "accuracy_large_err": accuracy_large_err,
-            "dynamic_accuracy": dynamic_accuracy,
-            "dynamic_accuracy_err": dynamic_accuracy_err,
-            "cost_base": cost_base,
-            "cost_large": cost_large,
-            "dynamic_cost": dynamic_cost,
-            "dibc_base2large": delta_ibc_base2large,
-            "dibc_base2expert": delta_ibc_base2lexpert,
-            "dibc_large2expert": delta_ibc_large2expert,
-            "system_risk": system_risk,
-            "system_risk_base": system_risk_base,
-            "system_risk_large": system_risk_large,
-            "system_risk_expert": system_risk_expert,
-            "system_risk_static": system_risk_static,
+        confidence_scores = transformed_scores
+        
+        # Prepare data
+        X = confidence_scores
+        y = np.array(correctness)
+        
+        # Build Bayesian Logistic Regression model
+        with pm.Model() as model:
+            # Priors for intercept and coefficient
+            x = pm.MutableData("x", X)
+            alpha = pm.Normal("alpha", mu=0, sigma=10)
+            beta = pm.Normal("beta", mu=0, sigma=10)
+            p = pm.Deterministic("p", pm.math.invlogit(beta*x + alpha))
+            
+            # Likelihood (logistic)
+            pm.Bernoulli("y", p=p, observed=y)
+            
+            # Sample from the posterior
+            trace = pm.sample(1000, tune=1000, return_inferencedata=True, random_seed=42)
+        
+        return {
+            "model": model,
+            "trace": trace,
+            "X": X,
+            "y": y
         }
-
-        # Save metrics to file
-        pd.DataFrame([metrics]).to_csv(
-            os.path.join(self.run_dir, "metrics.csv"), index=False
-        )
-
-        self._print_performance_summary(data=data, metrics=metrics)
-
-        # Add decision matrix analysis
-        outcomes = self._analyze_decision_outcomes(data)
-        self._print_decision_matrix(outcomes)
-
-        # Save outcomes to file
-        pd.DataFrame([outcomes]).to_csv(
-            os.path.join(self.run_dir, "decision_outcomes.csv"), index=False
-        )
-
-    def _print_performance_summary(self, data: pd.DataFrame, metrics: Dict) -> None:
-        """Print a formatted table summarizing the performance of different agents,
-        plus deferral metrics for the Model-vs-Model (MvM) step.
-        """
-
-        # 1. Run the outcomes analysis to retrieve counts
-        outcomes = self._analyze_decision_outcomes(data)
-
-        # 2. Existing code to compute expert accuracy, cost per sample, etc.
-        expert_data = data[data["decision"] == 2]
-        if len(expert_data) > 0:
-            expert_correct = (expert_data["prediction"] == expert_data["label"]).astype(
-                int
-            )
-            expert_accuracy = expert_correct.mean()
-            expert_accuracy_err = expert_correct.std() / np.sqrt(len(expert_correct))
-        else:
-            expert_accuracy = float("nan")
-            expert_accuracy_err = float("nan")
-
-        cost_per_sample_base = metrics["cost_base"] / len(data)
-        cost_per_sample_large = metrics["cost_large"] / len(data)
-        cost_per_sample_dynamic = metrics["dynamic_cost"] / len(data)
-        cost_per_sample_expert = self.cfg.costs.expert_cost
-
-        system_risk = metrics["system_risk"]
-        system_risk_base = metrics["system_risk_base"]
-        system_risk_large = metrics["system_risk_large"]
-        system_risk_expert = metrics["system_risk_expert"]
-        system_risk_static = metrics["system_risk_static"]
-
-        # 3. Print your original performance table as before
-        rows = [
-            ["Model", "Accuracy", "Cost per Sample", "System Risk"],
-            ["-----", "--------", "---------------", "-----------"],
-            [
-                "Base Model",
-                f"{metrics['accuracy_base']:.3f} ± {metrics['accuracy_base_err']:.3f}",
-                f"{cost_per_sample_base:.2f}",
-                f"{system_risk_base:.2f}",
-            ],
-            [
-                "Large Model",
-                f"{metrics['accuracy_large']:.3f} ± {metrics['accuracy_large_err']:.3f}",
-                f"{cost_per_sample_large:.2f}",
-                f"{system_risk_large:.2f}",
-            ],
-            [
-                "Expert",
-                (
-                    f"{expert_accuracy:.3f} ± {expert_accuracy_err:.3f}"
-                    if not np.isnan(expert_accuracy)
-                    else "N/A"
-                ),
-                f"{cost_per_sample_expert:.2f}",
-                f"{system_risk_expert:.2f}",
-            ],
-            [
-                "Static System",
-                f"N/A",
-                f"N/A",
-                f"{system_risk_static:.2f}",
-            ],
-            [
-                "Dynamic System",
-                f"{metrics['dynamic_accuracy']:.3f} ± {metrics['dynamic_accuracy_err']:.3f}",
-                f"{cost_per_sample_dynamic:.2f}",
-                f"{system_risk:.2f}",
-            ],
-        ]
-
-        col_widths = [
-            max(len(str(row[i])) for row in rows) for i in range(len(rows[0]))
-        ]
-
-        print("\nPerformance Summary:")
-        print("===================")
-        for row in rows:
-            formatted_row = [
-                f"{str(item):<{width}}" for item, width in zip(row, col_widths)
-            ]
-            print("  ".join(formatted_row))
-
-        print("\nIncremental Cost-Benefit:")
-        print("====================")
-        print(f"∆IBC(Base -> Large):\t {metrics['dibc_base2large']:.2f}")
-        print(f"∆IBC(Base -> Expert):\t {metrics['dibc_base2expert']:.2f}")
-        print(f"∆IBC(Large -> Expert):\t {metrics['dibc_large2expert']:.2f}")
-
-        print("\nDecision Distribution:")
-        print("====================")
-        model_counts = data["decision"].value_counts().sort_index()
-        total_samples = len(data)
-        for decision, count in model_counts.items():
-            model_name = ["Base Model", "Large Model", "Expert"][decision]
-            percentage = (count / total_samples) * 100
-            print(f"{model_name}:\t\t {count} samples ({percentage:.1f}%)")
-
-        # 4. Compute deferral metrics for the MvM step
-        self._print_mvm_deferral_metrics(outcomes)
-
-    def _print_decision_matrix(self, outcomes: Dict[str, int]) -> None:
-        """
-        Print a formatted decision matrix showing all possible outcomes.
-        """
-        total = outcomes["SM_Path_Total"] + outcomes["LM_Path_Total"]
-
-        print("\nDecision Outcome Matrix:")
-        print("=======================")
-
-        # Small Model Path Analysis
-        print(
-            f"\nSmall Model Path ({outcomes['SM_Path_Total']} samples, {outcomes['SM_Path_Total']/total*100:.1f}%):"
-        )
-        s2m_total = outcomes["SM_Necessary_Large"] + outcomes["SM_Unnecessary_Large"]
-        print(
-            f"├── Large Model Escalation ({s2m_total} samples, {s2m_total/total*100:.1f}%):"
-        )
-        if s2m_total > 0:
-            print(
-                f"│   ├── Necessary: {outcomes['SM_Necessary_Large']} ({outcomes['SM_Necessary_Large']/s2m_total*100:.1f}%)"
-            )
-            print(
-                f"│   └── Unnecessary: {outcomes['SM_Unnecessary_Large']} ({outcomes['SM_Unnecessary_Large']/s2m_total*100:.1f}%)"
-            )
-        sm_total_direct = outcomes["SM_Direct_Correct"] + outcomes["SM_Direct_Wrong"]
-        print(
-            f"├── Direct Decisions ({sm_total_direct} samples, {sm_total_direct/total*100:.1f}%):"
-        )
-        if sm_total_direct > 0:
-            print(
-                f"│   ├── Correct: {outcomes['SM_Direct_Correct']} ({outcomes['SM_Direct_Correct']/sm_total_direct*100:.1f}%)"
-            )
-            print(
-                f"│   └── Wrong: {outcomes['SM_Direct_Wrong']} ({outcomes['SM_Direct_Wrong']/sm_total_direct*100:.1f}%)"
-            )
-        sm_total_escalated = (
-            outcomes["SM_Necessary_Expert"] + outcomes["SM_Unnecessary_Expert"]
-        )
-        print(
-            f"└── Expert Escalations: ({sm_total_escalated} samples, {sm_total_escalated/total*100:.1f}%):"
-        )
-        if sm_total_escalated > 0:
-            print(
-                f"    ├── Necessary Escalated: {outcomes['SM_Necessary_Expert']} ({outcomes['SM_Necessary_Expert']/sm_total_escalated*100:.1f}%)"
-            )
-            print(
-                f"    └── Unnecessary Escalations: {outcomes['SM_Unnecessary_Expert']} ({outcomes['SM_Unnecessary_Expert']/sm_total_escalated*100:.1f}%)"
-            )
-
-        # Large Model Path Analysis
-        print(
-            f"\nLarge Model Path ({outcomes['LM_Path_Total']} samples, {outcomes['LM_Path_Total']/total*100:.1f}%):"
-        )
-        lm_total_direct = outcomes["LM_Direct_Correct"] + outcomes["LM_Direct_Wrong"]
-        if outcomes["LM_Path_Total"] > 0:
-            print(
-                f"├── Direct Decisions ({lm_total_direct} samples, {lm_total_direct/outcomes['LM_Path_Total']*100:.1f}%):"
-            )
-        if lm_total_direct > 0:
-            print(
-                f"│   ├── Correct: {outcomes['LM_Direct_Correct']} ({outcomes['LM_Direct_Correct']/lm_total_direct*100:.1f}%)"
-            )
-            print(
-                f"│   └── Wrong: {outcomes['LM_Direct_Wrong']} ({outcomes['LM_Direct_Wrong']/lm_total_direct*100:.1f}%)"
-            )
-        lm_total_escalated = (
-            outcomes["LM_Necessary_Expert"] + outcomes["LM_Unnecessary_Expert"]
-        )
-        if outcomes["LM_Path_Total"] > 0:
-            print(
-                f"└── Expert Escalations: ({lm_total_escalated} samples, {lm_total_escalated/outcomes['LM_Path_Total']*100:.1f}%):"
-            )
-        if lm_total_escalated > 0:
-            print(
-                f"    ├── Necessary Escalated: {outcomes['LM_Necessary_Expert']} ({outcomes['LM_Necessary_Expert']/lm_total_escalated*100:.1f}%)"
-            )
-            print(
-                f"    └── Unnecessary Escalations: {outcomes['LM_Unnecessary_Expert']} ({outcomes['LM_Unnecessary_Expert']/lm_total_escalated*100:.1f}%)"
-            )
-
-        # Expert Analysis
-        print(
-            f"\nExpert Decisions ({outcomes['Expert_Total']} samples, {outcomes['Expert_Total']/total*100:.1f}% of total):"
-        )
-        necessary = outcomes["SM_Necessary_Expert"] + outcomes["LM_Necessary_Expert"]
-        unnecessary = (
-            outcomes["SM_Unnecessary_Expert"] + outcomes["LM_Unnecessary_Expert"]
-        )
-        if outcomes["Expert_Total"] > 0:
-            print(
-                f"├── Necessary: {necessary} ({necessary/outcomes['Expert_Total']*100:.1f}%)"
-            )
-            print(
-                f"└── Unnecessary: {unnecessary} ({unnecessary/outcomes['Expert_Total']*100:.1f}%)"
-            )
-
-    def _analyze_decision_outcomes(self, data: pd.DataFrame) -> Dict[str, int]:
-        """
-        Analyze decision outcomes and classify them into categories.
-
-        The analysis tracks scenarios including:
-        - Small Model decision outcomes (confident & correct/wrong, uncertain -> expert)
-        - Large Model decision outcomes (confident & correct/wrong, uncertain -> expert)
-        - Expert outcomes (from SM path vs LM path, correct/wrong)
-
-        Args:
-            data: DataFrame containing decision outcomes with columns:
-                'decision', 'prediction', 'label', 'uncertainty',
-                'acceptance_ratios', etc.
-
-        Returns:
-            Dictionary containing counts for each scenario
-        """
-        outcomes = {
-            # Small Model Direct Decisions
-            "SM_Direct_Correct": 0,  # Small model correct (no escalation)
-            "SM_Direct_Wrong": 0,  # Small model wrong (no escalation)
-            "SM_Necessary_Large": 0,
-            "SM_Unnecessary_Large": 0,
-            "SM_Necessary_Expert": 0,  # Small model wrong & uncertainty was high
-            "SM_Unnecessary_Expert": 0,  # Small model would be correct but escalated
-            # Large Model Direct Decisions
-            "LM_Direct_Correct": 0,  # Large model correct (no escalation)
-            "LM_Direct_Wrong": 0,  # Large model wrong (no escalation)
-            "LM_Necessary_Expert": 0,  # Large model wrong & uncertainty was high
-            "LM_Unnecessary_Expert": 0,  # Large model would be correct but escalated
-            "LM_corrected_wrong_pred": 0,
-            # Path Analysis
-            "SM_Path_Total": 0,  # Total decisions through small model path
-            "LM_Path_Total": 0,  # Total decisions through large model path
-            "Expert_Total": 0,  # Total expert consultations
-        }
-
-        for _, row in data.iterrows():
-            # Extract key values
-            decision = row["decision"]
-            is_correct = row["prediction"] == row["label"]
-            base_would_be_correct = row["base_prediction"] == row["label"]
-            large_would_be_correct = row["large_prediction"] == row["label"]
-
-            # Determine which path was taken (based on acceptance_ratios)
-            took_sm_path = row["u"] < row["acceptance_ratios"]
-
-            if took_sm_path:
-                outcomes["SM_Path_Total"] += 1
-
-                if decision == 0:  # Used Small Model
-                    if is_correct:
-                        outcomes["SM_Direct_Correct"] += 1
-                    else:
-                        outcomes["SM_Direct_Wrong"] += 1
-
-                elif decision == 2:  # Escalated to Expert
-                    outcomes["Expert_Total"] += 1
-                    if base_would_be_correct:
-                        outcomes["SM_Unnecessary_Expert"] += 1
-                    else:
-                        outcomes["SM_Necessary_Expert"] += 1
-
-            else:  # Large Model Path
-                outcomes["LM_Path_Total"] += 1
-                if base_would_be_correct:
-                    outcomes["SM_Unnecessary_Large"] += 1
-                else:
-                    outcomes["SM_Necessary_Large"] += 1
-                    if is_correct:
-                        outcomes["LM_corrected_wrong_pred"] += 1
-
-                if decision == 1:  # Used Large Model
-                    if is_correct:
-                        outcomes["LM_Direct_Correct"] += 1
-                    else:
-                        outcomes["LM_Direct_Wrong"] += 1
-
-                elif decision == 2:  # Escalated to Expert
-                    outcomes["Expert_Total"] += 1
-                    if large_would_be_correct:
-                        outcomes["LM_Unnecessary_Expert"] += 1
-                    else:
-                        outcomes["LM_Necessary_Expert"] += 1
-
-        return outcomes
-
-    def _print_mvm_deferral_metrics(self, outcomes: Dict[str, int]) -> None:
-        """
-        Calculate and print:
-        1) Deferral rate
-        2) Unnecessary deferral rate
-        3) Error recovery rate
-        along with binomial standard errors.
-        """
-
-        print("\nMvM Deferral Metrics:")
-        print("=====================")
-
-        # -- 1) DEFERRAL RATE
-        # fraction of times we escalated to large among base-model candidates
-        total = outcomes["SM_Path_Total"] + outcomes["LM_Path_Total"]
-        deferrals = outcomes["LM_Path_Total"]
-        if total > 0:
-            deferral_rate = deferrals / total
-            # Binomial standard error:
-            deferral_rate_err = np.sqrt(deferral_rate * (1 - deferral_rate) / total)
-        else:
-            deferral_rate = float("nan")
-            deferral_rate_err = float("nan")
-
-        print(
-            f"Deferral Rate (Base->Large):\t {deferral_rate*100:.1f} $\pm$ {deferral_rate_err*100:.1f}"
-        )
-
-        # -- 2) UNNECESSARY DEFERRAL RATE
-        # among times base model was correct and used, fraction that got escalated
-        all_deferrals = (
-            outcomes["SM_Necessary_Large"] + outcomes["SM_Unnecessary_Large"]
-        )
-        # (We ignore SM_Unnecessary_Expert if we only care about deferrals to large.)
-        if all_deferrals > 0:
-            unnecessary_deferral_rate = outcomes["SM_Unnecessary_Large"] / all_deferrals
-            un_rate_err = np.sqrt(
-                unnecessary_deferral_rate
-                * (1 - unnecessary_deferral_rate)
-                / all_deferrals
-            )
-        else:
-            unnecessary_deferral_rate = float("nan")
-            un_rate_err = float("nan")
-
-        print(
-            f"Unnecessary Deferral Rate:\t {unnecessary_deferral_rate*100:.1f} $\pm$ {un_rate_err*100:.1f}"
-        )
-
-        # -- 3) ERROR RECOVERY RATE
-        # among times base model was wrong, fraction that got escalated
-        if all_deferrals > 0:
-            error_recovery_rate = outcomes["LM_corrected_wrong_pred"] / all_deferrals
-            er_rate_err = np.sqrt(
-                error_recovery_rate * (1 - error_recovery_rate) / all_deferrals
-            )
-        else:
-            error_recovery_rate = float("nan")
-            er_rate_err = float("nan")
-
-        print(
-            f"Error Recovery Rate:\t\t {error_recovery_rate*100:.1f} $\pm$ {er_rate_err*100:.1f}"
-        )
