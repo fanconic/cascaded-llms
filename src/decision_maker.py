@@ -280,28 +280,28 @@ class AIDecisionSystem:
             raise NotImplementedError(f"Not implemented {use_larger_model}")
 
         u = random.random()
-        # Predict Model 1
-        if u < acceptance_probability:
-            return (
-                0,
-                base_response,
-                base_gen_cost 
-                + first_inf_cost,
-                base_uncert,
-                u,
-            )
+        # # Predict Model 1
+        # if u < acceptance_probability:
+        #     return (
+        #         0,
+        #         base_response,
+        #         base_gen_cost 
+        #         + first_inf_cost,
+        #         base_uncert,
+        #         u,
+        #     )
 
-        # Escalate to Model 2
-        else:  
-            return (
-                1,
-                large_response,
-                base_gen_cost 
-                + first_inf_cost 
-                + large_gen_cost,
-                large_uncert,
-                u,
-            )
+        # # Escalate to Model 2
+        # else:  
+        #     return (
+        #         1,
+        #         large_response,
+        #         base_gen_cost 
+        #         + first_inf_cost 
+        #         + large_gen_cost,
+        #         large_uncert,
+        #         u,
+        #     )
         
         
         # Abstain Model 1
