@@ -290,13 +290,141 @@ Choices:
         return dataset.map(preprocess_example, batched=False)
 
 
-class DefaultPreprocessor(DatasetPreprocessor):
-    """Default preprocessing logic for unknown datasets."""
-
-    prompt_template = "Please answer with one of the option in the bracket"
+class MMLUPreprocessor(DatasetPreprocessor):
+    """Preprocessing logic for MMLU (Massive Multitask Language Understanding) dataset."""
 
     @staticmethod
     def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
+        prompt_template = """You are an expert in {subject}.
+Answer the following multiple-choice question using step-by-step reasoning, then conclude with a final line stating the best answer.
+
+Question: {question}
+
+Choices:
+{choices}
+
+Let's reason step-by-step, then conclude with: "The best answer is: <X>"
+
+Reasoning:
+"""
+
+        question_template = """Question: {question}
+
+Choices:
+{choices}
+"""
+
+        def preprocess_example(example):
+            choices = "\n".join([f"{chr(65+i)}) {choice}" for i, choice in enumerate(example["choices"])])
+            prompt = prompt_template.format(
+                subject=example["subject"],
+                question=example["question"],
+                choices=choices
+            )
+            
+            example["prompts"] = prompt
+            example["questions"] = question_template.format(
+                question=example["question"],
+                choices=choices
+            )
+            example["answer"] = chr(65 + example["answer"])  # Convert 0-based index to A,B,C,D
+            
+            # Clean up original fields
+            del example["question"]
+            del example["choices"]
+            return example
+
+        return dataset.map(preprocess_example, batched=False)
+
+
+class MATHPreprocessor(DatasetPreprocessor):
+    """Preprocessing logic for MATH dataset."""
+
+    @staticmethod
+    def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
+        prompt_template = """You are a mathematics expert.
+Solve the following mathematics problem step by step, showing all your work clearly.
+
+Problem: {problem}
+
+Level: {level}
+Subject: {subject}
+
+Let's solve this step by step, then conclude with the final answer.
+
+The final answer has to be boxed in latex format, like this: $\\boxed{{<X>}}$
+
+Reasoning:
+"""
+
+        question_template = """Problem: {problem}"""
+
+        def preprocess_example(example):
+            prompt = prompt_template.format(
+                problem=example["problem"],
+                level=example["level"],
+                subject=example["subject"]
+            )
+            
+            example["prompts"] = prompt
+            example["questions"] = question_template.format(
+                problem=example["problem"]
+            )
+            example["answer"] = example["answer"]
+            
+            # Clean up original fields
+            del example["problem"]
+            del example["solution"]
+            return example
+
+        return dataset.map(preprocess_example, batched=False)
+
+
+class AIMEPreprocessor(DatasetPreprocessor):
+    """Preprocessing logic for AIME (American Invitational Mathematics Examination) dataset."""
+
+    @staticmethod
+    def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
+        prompt_template = """You are solving an AIME (American Invitational Mathematics Examination) problem.
+These problems require sophisticated mathematical insights and typically have a three-digit answer.
+
+Problem: {problem}
+
+Solve this step by step, then provide the final three-digit answer.
+
+The final answer has to be boxed in latex format, like this: $\\boxed{{<X>}}$
+
+Reasoning:
+"""
+
+        question_template = """Problem: {problem}"""
+        
+        def preprocess_example(example):
+            prompt = prompt_template.format(
+                problem=example["problem"]
+            )
+            
+            example["prompts"] = prompt
+            example["questions"] = question_template.format(
+                problem=example["problem"]
+            )
+            example["answer"] = str(example["answer"]).zfill(3)  # Ensure 3-digit format
+            
+            # Clean up original fields
+            del example["problem"]
+            del example["solution"]
+            return example
+
+        return dataset.map(preprocess_example, batched=False)
+
+
+class DefaultPreprocessor(DatasetPreprocessor):
+    """Default preprocessing logic for unknown datasets."""
+
+    @staticmethod
+    def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
+        prompt_template = "Please answer with one of the option in the bracket"
+        
         def preprocess_example(example):
             prompts = [f"{prompt_template}\n\nInput: {example['input']}\n\nOutput:"]
             example["prompts"] = prompts
@@ -314,5 +442,8 @@ def get_preprocessor(dataset_name: str) -> Callable:
         "qiaojin/PubMedQA": PubMedQAPreprocessor,
         "openlifescienceai/medmcqa": MedMCQAPreprocessor,
         "Eladio/emrqa-msquad": DatasetPreprocessor,
+        "cais/mmlu": MMLUPreprocessor,
+        "nlile/hendrycks-MATH-benchmark": MATHPreprocessor,
+        "AI-MO/aimo-validation-aime": AIMEPreprocessor,
     }
     return preprocessors.get(dataset_name, DefaultPreprocessor)
