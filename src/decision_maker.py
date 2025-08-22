@@ -18,7 +18,7 @@ from transformers import (
     PreTrainedTokenizer,
 )
 from src.config import ModelConfig, CostConfig, OnlineConfig
-from src.utils import extract_predictions, calculate_costs
+from src.utils import extract_predictions, calculate_costs, extract_answer
 import numpy as np
 
 
@@ -138,6 +138,7 @@ class AIDecisionSystem:
                 do_sample=True,
                 temperature=0.3,
                 top_p=0.9,
+                use_cache=True,  # Enable KV-caching
             )
         # Calculate generation costs based on token counts
         input_token_counts = [len(tokenizer.encode(prompt)) for prompt in prompts]
@@ -280,7 +281,7 @@ class AIDecisionSystem:
             raise NotImplementedError(f"Not implemented {use_larger_model}")
 
         u = random.random()
-        # # Predict Model 1
+        # Predict Model 1
         # if u < acceptance_probability:
         #     return (
         #         0,
@@ -617,13 +618,21 @@ class AIDecisionSystem:
             large_outputs, large_gen_costs = self.generate_response(
                 self.large_model, self.large_tokenizer, prompts
             )
-
-            base_predictions = [
-                extract_predictions(base_output) for base_output in base_outputs
-            ]
-            large_predictions = [
-                extract_predictions(large_output) for large_output in large_outputs
-            ]
+        
+            if prompts[0].startswith("You are solving AIME"): 
+                base_predictions = [
+                    extract_answer(base_output) for base_output in base_outputs
+                ]
+                large_predictions = [
+                    extract_answer(large_output) for large_output in large_outputs
+                ]
+            else:
+                base_predictions = [
+                    extract_predictions(base_output) for base_output in base_outputs
+                ]
+                large_predictions = [
+                    extract_predictions(large_output) for large_output in large_outputs
+                ]
 
         else:
             base_outputs = precomputed_batch["base_response"].astype(str).tolist()
@@ -634,6 +643,12 @@ class AIDecisionSystem:
             large_predictions = (
                 precomputed_batch["large_prediction"].astype(str).tolist()
             )
+            
+            if prompts[0].startswith("You are solving AIME"): 
+                base_predictions = [str(int(float(bp))).zfill(3) if bp != 'nan' else np.nan for bp in base_predictions]
+                large_predictions = [str(int(float(lp))).zfill(3) if lp != 'nan' else np.nan for lp in large_predictions]
+
+
 
         (
             base_probs,
@@ -703,8 +718,8 @@ class AIDecisionSystem:
                     self.xi_large,
                     self.xi_base_single,
                     self.xi_large_single,
-                    large_probs_for_base_dist[i],
-                    large_uncertainties_dist[i],
+                    large_probs_for_base_dist[i] if large_on_small_calibration_model else 1 - large_probs_for_base[i],
+                    large_uncertainties_dist[i] if large_calibration_model else 1 - large_uncertainties[i],
                     base_gen_cost=base_gen_costs[i],
                     large_gen_cost=large_gen_costs[i],
                     large_inf_cost=large_inf_costs[i],
@@ -717,8 +732,8 @@ class AIDecisionSystem:
                     self.initial_xi_large,
                     self.xi_base_single,
                     self.xi_large_single,
-                    large_probs_for_base_dist[i],
-                    large_uncertainties_dist[i],
+                    large_probs_for_base_dist[i] if large_on_small_calibration_model else 1 - large_probs_for_base[i],
+                    large_uncertainties_dist[i] if large_calibration_model else 1 - large_uncertainties[i],
                     base_gen_cost=base_gen_costs[i],
                     large_gen_cost=large_gen_costs[i],
                     large_inf_cost=large_inf_costs[i],

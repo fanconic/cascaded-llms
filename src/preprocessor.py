@@ -1,5 +1,5 @@
 from typing import Dict, Callable
-from datasets import Dataset
+from datasets import Dataset, Value
 from omegaconf import DictConfig
 
 
@@ -313,27 +313,41 @@ Reasoning:
 Choices:
 {choices}
 """
-
+        
+        label2number = {
+            "A": "A",
+            "B": "B",
+            "C": "C",
+            "D": "D",
+            "E": "E",
+            "0": "A",
+            "1": "B",
+            "2": "C",
+            "3": "D",
+            "4": "E",
+        }
+        
+        dataset = dataset.cast_column("answer", Value("string"))
+        
         def preprocess_example(example):
-            choices = "\n".join([f"{chr(65+i)}) {choice}" for i, choice in enumerate(example["choices"])])
-            prompt = prompt_template.format(
-                subject=example["subject"],
-                question=example["question"],
-                choices=choices
-            )
+            choices_str = "\n".join([f"{chr(65+i)}) {choice}" for i, choice in enumerate(example["choices"])])
+    
+            answer_letter = label2number[str(example["answer"])]
             
-            example["prompts"] = prompt
-            example["questions"] = question_template.format(
-                question=example["question"],
-                choices=choices
-            )
-            example["answer"] = chr(65 + example["answer"])  # Convert 0-based index to A,B,C,D
+            return {
+                "prompts": prompt_template.format(
+                    subject=example["subject"],
+                    question=example["question"],
+                    choices=choices_str,
+                ),
+                "questions": question_template.format(
+                    question=example["question"],
+                    choices=choices_str,
+                ),
+                "answer": answer_letter,
+                "subject": example["subject"],
+            }
             
-            # Clean up original fields
-            del example["question"]
-            del example["choices"]
-            return example
-
         return dataset.map(preprocess_example, batched=False)
 
 
@@ -350,9 +364,7 @@ Problem: {problem}
 Level: {level}
 Subject: {subject}
 
-Let's solve this step by step, then conclude with the final answer.
-
-The final answer has to be boxed in latex format, like this: $\\boxed{{<X>}}$
+Let's reason step-by-step, then conclude with: "The answer is: <X>"
 
 Reasoning:
 """
@@ -385,14 +397,19 @@ class AIMEPreprocessor(DatasetPreprocessor):
 
     @staticmethod
     def preprocess(dataset: Dataset, cfg: DictConfig) -> Dataset:
-        prompt_template = """You are solving an AIME (American Invitational Mathematics Examination) problem.
-These problems require sophisticated mathematical insights and typically have a three-digit answer.
+        prompt_template = """You are solving AIME (American Invitational Mathematics Examination) problems.
 
 Problem: {problem}
 
-Solve this step by step, then provide the final three-digit answer.
+Important: Always end your solution with the final answer in one of these two formats:
 
-The final answer has to be boxed in latex format, like this: $\\boxed{{<X>}}$
+1. \\[
+   \\boxed{{X}}.
+   \\]
+
+2. $n=\\boxed{{X}}$
+
+where X is your integer answer between 0 and 999.
 
 Reasoning:
 """

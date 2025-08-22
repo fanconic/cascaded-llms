@@ -5,6 +5,7 @@ import seaborn as sns
 import random
 import torch
 import numpy as np
+import pandas as pd
 
 sns.set_style("whitegrid")
 plt.style.use("science")
@@ -76,30 +77,77 @@ def extract_predictions(response: str) -> str:
         # Patterns to match different formats of predictions
         patterns = [
             r"The best answer is: (\w+)",  # "The best answer is: A" or "The best answer is: 1"
-            r"The best answer is (\w+)",  # "The best answer is A" or "The best answer is 1"
+            r"The best answer is (\w+)",   # "The best answer is A" or "The best answer is 1"
+            r"\\boxed{(.*?)}",              # LaTeX boxed number like \boxed{12345}
+            r"The answer is: ([\d.]+)",    # Plain number format like "The answer is: 836"
+            r"The answer is ([\d.]+)",     # Alternative number format without colon
         ]
 
         # Loop through the patterns to find a match
         for pattern in patterns:
             match = re.search(pattern, response.strip(), re.IGNORECASE)
             if match:
-                prediction = match.group(
-                    1
-                ).lower()  # Convert to lowercase for "yes"/"no"
+                prediction = match.group(1).lower()  # Convert to lowercase for "yes"/"no"
 
-                # Validate the extracted prediction
-                if prediction in "abcde" or prediction in {"yes", "no"}:
-                    return (
-                        prediction.lower()
-                        if prediction in {"yes", "no"}
-                        else prediction.upper()
-                    )
+                # Handle multiple types of predictions
+                if prediction in "abcde":
+                    return prediction.upper()  # Return A-E answers in uppercase
+                elif prediction in {"yes", "no"}:
+                    return prediction.lower()  # Return yes/no in lowercase
+                else:
+                    try:
+                        # Remove trailing punctuation and validate numeric answers
+                        cleaned_prediction = prediction.rstrip('.')
+                        float(cleaned_prediction)  # Validate it's a number
+                        return str(cleaned_prediction).zfill(3)  # Return numeric answers as strings without trailing punctuation
+                    except ValueError:
+                        pass
 
         # Return None if no valid pattern is matched
         return None
     except Exception as e:
         print(f"Error while extracting prediction: {e}")
         return None
+
+def extract_answer(response: str):
+    """
+    Extract the numerical answer from a math solution response.
+    Handles various formats of boxed answers and falls back to last number if needed.
+    """
+    if not response:
+        return None
+        
+    # Clean the response
+    response = ' '.join(response.split())
+    
+    patterns = [
+        r'\$n=\\boxed{(\d+)}\$',
+        r'\\\[\\boxed{(\d+)}\\\]',
+        r'\\\[\\boxed{(\d+)}\.\\\]',
+        r'\\boxed{(\d+)}',
+        r'\$\\boxed{(\d+)}\$',
+        r'boxed{(\d+)}',
+        r'\\boxed\s*{\s*(\d+)\s*}',
+        r'\bboxed\s*{\s*(\d+)\s*}',
+        r'final answer is[^\d]*(\d+)',
+        r'answer is[^\d]*(\d+)',
+        r'answer:[^\d]*(\d+)',
+        r'= ?(\d+)$'
+    ]
+    
+    for pattern in patterns:
+        matches = re.finditer(pattern, response, re.IGNORECASE)
+        last_match = None
+        for match in matches:
+            last_match = match
+            
+        if last_match:
+            try:
+                return str(int(last_match.group(1))).zfill(3)
+            except (ValueError, IndexError):
+                continue
+            
+    return None
 
 
 def plot_accuracy_vs_cost(
@@ -417,6 +465,64 @@ def plot_risk_and_cumulative_risk(run_dir, decisions):
 
     # Create the plot
     plt.figure(figsize=(3, 3))
+    
+    df_sparse = pd.DataFrame()
+    df_sparse["base"] = {200: decisions_copy["Cumulative Base"][199], # manually offset the calibration set
+                            400: decisions_copy["Cumulative Base"][399],
+                            600: decisions_copy["Cumulative Base"][599],
+                            800: decisions_copy["Cumulative Base"][799],
+                            1000: decisions_copy["Cumulative Base"][999]}
+    
+    df_sparse["large"] = {200: decisions_copy["Cumulative Large"][199], # manually offset the calibration set
+                            400: decisions_copy["Cumulative Large"][399],
+                            600: decisions_copy["Cumulative Large"][599],
+                            800: decisions_copy["Cumulative Large"][799],
+                            1000: decisions_copy["Cumulative Large"][999]}
+
+    df_sparse["cascade"] = {200: decisions_copy["Cumulative Dynamic"][199], # manually offset the calibration set
+                            400: decisions_copy["Cumulative Dynamic"][399],
+                            600: decisions_copy["Cumulative Dynamic"][599],
+                            800: decisions_copy["Cumulative Dynamic"][799],
+                            1000: decisions_copy["Cumulative Dynamic"][999]}
+    
+    df_sparse["base_lower"] = {200: base_lower[99], # manually offset the calibration set
+                            400: base_lower[299],
+                            600: base_lower[499],
+                            800: base_lower[599],
+                            1000: base_lower[-1]}
+    
+    df_sparse["large_lower"] = {200: large_lower[99], # manually offset the calibration set
+                            400: large_lower[299],
+                            600: large_lower[499],
+                            800: large_lower[699],
+                            1000: large_lower[-1]}
+
+    df_sparse["cascade_lower"] = {200: dynamic_lower[99], # manually offset the calibration set
+                            400: dynamic_lower[299],
+                            600: dynamic_lower[499],
+                            800: dynamic_lower[699],
+                            1000: dynamic_lower[-1]}
+    
+    df_sparse["base_upper"] = {200: base_upper[99], # manually offset the calibration set
+                            400: base_upper[299],
+                            600: base_upper[499],
+                            800: base_upper[699],
+                            1000: base_upper[-1]}
+    
+    df_sparse["large_upper"] = {200: large_upper[99], # manually offset the calibration set
+                            400: large_upper[299],
+                            600: large_upper[499],
+                            800: large_upper[699],
+                            1000: large_upper[-1]}
+
+    df_sparse["cascade_upper"] = {200: dynamic_upper[100], # manually offset the calibration set
+                            400: dynamic_upper[299],
+                            600: dynamic_upper[499],
+                            800: dynamic_upper[699],
+                            1000: dynamic_upper[-1]}
+    
+    df_sparse.to_csv(os.path.join(run_dir, "sparse_results.csv"))
+
 
     # Plot the cumulative system risk with confidence intervals
 
@@ -530,3 +636,27 @@ def set_seed(seed):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
         torch.backends.cudnn.deterministic = True
+
+
+def flip_labels(df: pd.DataFrame, col: str, fraction: float, seed: int = 42) -> pd.Series:
+    """Randomly flip a fraction of True and False values in a boolean column."""
+    rng = np.random.default_rng(seed)
+    col_values = df[col].copy()
+
+    # Indices of True and False values
+    true_indices = col_values[col_values == True].index
+    false_indices = col_values[col_values == False].index
+
+    # Number of flips
+    n_true_flip = int(len(true_indices) * fraction)
+    n_false_flip = int(len(false_indices) * fraction)
+
+    # Sample indices to flip
+    true_to_flip = rng.choice(true_indices, size=n_true_flip, replace=False)
+    false_to_flip = rng.choice(false_indices, size=n_false_flip, replace=False)
+
+    # Flip values
+    col_values.loc[true_to_flip] = False
+    col_values.loc[false_to_flip] = True
+
+    return col_values

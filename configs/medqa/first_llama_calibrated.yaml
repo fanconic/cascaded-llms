@@ -28,7 +28,7 @@ precomputed:
   generation: true
   verification: true
   uncertainty: true
-  path: /home/azureuser/caf83/helm/followup_results/run_20250506_105826_first_llama_medqa
+  path: /mnt/pdata/caf83/helm/neurips/followup_results/run_20250506_105826_first_llama_medqa
 dataset:
   name: HuggingSara/medqa
   subset: 

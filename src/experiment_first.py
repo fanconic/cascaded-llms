@@ -37,9 +37,9 @@ class Experiment_first:
         self.dataset, self.dataset_length = self._load_dataset()
         self.preprocessor = get_preprocessor(cfg.dataset.name)
 
-        self.use_larger_models = ["base", "large"] #, "ensemble"]
-        self.number_of_repetition = [1, 5]
-        self.verification_funcs = [self_verification, surrogate_token_probs]
+        self.use_larger_models = ["large"] #["base", "large"] #, "ensemble"]
+        self.number_of_repetition = [1] #[1, 5]
+        self.verification_funcs = [surrogate_token_probs] #[self_verification, surrogate_token_probs]
 
         # Initialize models
         if not (
@@ -235,6 +235,9 @@ class Experiment_first:
             "system_risk_large": [],
             "system_risk_expert": [],
             "system_risk_static": [],
+            # Extra Info
+            "subject": [],
+            "level": [],
         }
 
         precomputed_batch = None
@@ -309,7 +312,7 @@ class Experiment_first:
                 if len(calibration_data) >= self.cfg.calibration_size:
                     import pandas as pd
 
-                    calib_df = pd.DataFrame(calibration_data)
+                    calib_df = pd.DataFrame(calibration_data).iloc[:self.cfg.calibration_size]
 
                     # Calibrate base model probabilities
                     base_calibration_model = self._calibrate_confidence_scores_bayesian(
@@ -343,9 +346,9 @@ class Experiment_first:
         collectors,
     ):
         for i, decision in enumerate(batch_decisions):
-            self._update_collectors(collectors, decision, batch["answer"][i])
+            self._update_collectors(collectors, decision, batch, i)
 
-    def _update_collectors(self, collectors: Dict, decision: Dict, label: str) -> None:
+    def _update_collectors(self, collectors: Dict, decision: Dict, batch: Dict, i: int) -> None:
         """Update result collectors with batch decision data."""
         collectors["questions"].append(decision["question"])
         collectors["decisions"].append(decision["decision"])
@@ -355,7 +358,7 @@ class Experiment_first:
         collectors["predictions"].append(decision["prediction"])
         collectors["base_predictions"].append(decision["base_prediction"])
         collectors["large_predictions"].append(decision["large_prediction"])
-        collectors["labels"].append(label)
+        collectors["labels"].append(batch["answer"][i])
 
         # MvM defferal
         collectors["u"].append(decision["u"])
@@ -386,6 +389,10 @@ class Experiment_first:
         collectors["system_risk_large"].append(decision["system_risk_large"])
         collectors["system_risk_expert"].append(decision["system_risk_expert"])
         collectors["system_risk_static"].append(decision["system_risk_static"])
+        
+        # Extra Info
+        collectors["subject"].append(batch["subject"][i] if "subject" in batch.keys() else None)
+        collectors["level"].append(batch["level"][i] if "level" in batch.keys() else None)
 
     def _create_dataframe_dict(self, collectors: Dict) -> Dict:
         """Create dictionary for DataFrame creation from collectors."""
@@ -421,6 +428,8 @@ class Experiment_first:
             "system_risk_large": collectors["system_risk_large"],
             "system_risk_expert": collectors["system_risk_expert"],
             "system_risk_static": collectors["system_risk_static"],
+            "subject": collectors["subject"],
+            "level": collectors["level"],
         }
 
     def _analyze_and_save_results(self, results: List[Dict]):
@@ -440,11 +449,19 @@ class Experiment_first:
                 index=False,
             )
             
-            #data = data.iloc[self.cfg.calibration_size :]
+            if data.subject.iloc[0] is not None:
+                for subject in data.subject.unique():
+                    input_data = data.iloc[self.cfg.calibration_size :]
+                    input_data = input_data[input_data.subject == subject]
 
-            # Calculate metrics for this experiment
+                    metrics = self._calculate_metrics(input_data)
+                    metrics["experiment_name"] = experiment_name
+                    metrics["subject"] = subject
+                    all_metrics.append(metrics)
+                    
             metrics = self._calculate_metrics(data.iloc[self.cfg.calibration_size :])
             metrics["experiment_name"] = experiment_name
+            metrics["subject"] = "all"
             all_metrics.append(metrics)
             experiment_data_list.append((experiment_name, metrics))
 

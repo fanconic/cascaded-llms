@@ -9,7 +9,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from src.utils import plot_decision_distribution, plot_risk_and_cumulative_risk, plot_tau_M
+from src.utils import plot_decision_distribution, plot_risk_and_cumulative_risk, plot_tau_M, flip_labels
 from src.config import ExperimentConfig
 from src.factory import DecisionMakerFactory
 from src.preprocessor import get_preprocessor
@@ -233,6 +233,9 @@ class Experiment_second:
             "system_risk_large": [],
             "system_risk_expert": [],
             "system_risk_static": [],
+            # Extra Info
+            "subject": [],
+            "level": [],
         }
 
         precomputed_batch = None
@@ -309,6 +312,10 @@ class Experiment_second:
 
                     calib_df = pd.DataFrame(calibration_data)
 
+                    # flipper = 1.0
+                    # calib_df["base_correct"] = flip_labels(calib_df, "base_correct", flipper)
+                    # calib_df["large_correct"] = flip_labels(calib_df, "large_correct", flipper)
+                    
                     # Calibrate base model probabilities
                     base_calibration_model = self._calibrate_confidence_scores_bayesian(
                         calib_df["base_prob"].values, calib_df["base_correct"].values
@@ -341,9 +348,9 @@ class Experiment_second:
         collectors,
     ):
         for i, decision in enumerate(batch_decisions):
-            self._update_collectors(collectors, decision, batch["answer"][i])
+            self._update_collectors(collectors, decision, batch, i)
 
-    def _update_collectors(self, collectors: Dict, decision: Dict, label: str) -> None:
+    def _update_collectors(self, collectors: Dict, decision: Dict, batch: Dict, i: int) -> None:
         """Update result collectors with batch decision data."""
         collectors["questions"].append(decision["question"])
         collectors["decisions"].append(decision["decision"])
@@ -353,7 +360,7 @@ class Experiment_second:
         collectors["predictions"].append(decision["prediction"])
         collectors["base_predictions"].append(decision["base_prediction"])
         collectors["large_predictions"].append(decision["large_prediction"])
-        collectors["labels"].append(label)
+        collectors["labels"].append(batch["answer"][i])
 
         # MvM defferal
         collectors["u"].append(decision["u"])
@@ -384,6 +391,10 @@ class Experiment_second:
         collectors["system_risk_large"].append(decision["system_risk_large"])
         collectors["system_risk_expert"].append(decision["system_risk_expert"])
         collectors["system_risk_static"].append(decision["system_risk_static"])
+        
+        # Extra Info
+        collectors["subject"].append(batch["subject"][i] if "subject" in batch.keys() else None)
+        collectors["level"].append(batch["level"][i] if "level" in batch.keys() else None)
 
     def _create_dataframe_dict(self, collectors: Dict) -> Dict:
         """Create dictionary for DataFrame creation from collectors."""
@@ -419,6 +430,8 @@ class Experiment_second:
             "system_risk_large": collectors["system_risk_large"],
             "system_risk_expert": collectors["system_risk_expert"],
             "system_risk_static": collectors["system_risk_static"],
+            "subject": collectors["subject"],
+            "level": collectors["level"],
         }
 
     def _analyze_and_save_results(self, results: List[Dict]):
@@ -436,7 +449,9 @@ class Experiment_second:
             )
             
             data = data.iloc[self.cfg.calibration_size :]
-
+            if hasattr(self.cfg, "subject") and self.cfg.subject is not None:
+                data = data[data["subject"] == self.cfg.subject]
+    
             plot_decision_distribution(
                 self.run_dir, data["decision"], ["Base Model", "Large Model", "Abstention"]
             )

@@ -28,7 +28,7 @@ precomputed:
   generation: true
   verification: true
   uncertainty: true
-  path: /home/azureuser/caf83/helm/followup_results/run_20250506_231520_first_llama_medmcqa
+  path: /mnt/pdata/caf83/helm/neurips/followup_results/run_20250506_231520_first_llama_medmcqa
 dataset:
   name: openlifescienceai/medmcqa
   subset: null
