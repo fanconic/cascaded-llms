@@ -34,6 +34,8 @@ class Experiment_second:
         self.run_dir = self._setup_run_directory()
         self.dataset, self.dataset_length = self._load_dataset()
         self.preprocessor = get_preprocessor(cfg.dataset.name)
+        self.imperfect_expert = cfg.get("imperfect_expert", False)
+        self.flipping_ratio = cfg.get("flipping_ratio", 0.0)
 
         self.use_larger_models = ["large"]
         self.number_of_repetition = [1]
@@ -74,6 +76,7 @@ class Experiment_second:
                         uncertainty_samples=n,
                         batch_size=cfg.batch_size,
                         use_larger_model=use_larger_model,
+                        experiment="second",
                     )
 
                     decision_system = DecisionMakerFactory.create_decision_maker(
@@ -312,9 +315,9 @@ class Experiment_second:
 
                     calib_df = pd.DataFrame(calibration_data)
 
-                    # flipper = 1.0
-                    # calib_df["base_correct"] = flip_labels(calib_df, "base_correct", flipper)
-                    # calib_df["large_correct"] = flip_labels(calib_df, "large_correct", flipper)
+                    if self.imperfect_expert:
+                        calib_df["base_correct"] = flip_labels(calib_df, "base_correct", self.flipping_ratio)
+                        calib_df["large_correct"] = flip_labels(calib_df, "large_correct", self.flipping_ratio)
                     
                     # Calibrate base model probabilities
                     base_calibration_model = self._calibrate_confidence_scores_bayesian(

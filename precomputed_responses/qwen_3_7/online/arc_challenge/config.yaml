@@ -1,0 +1,38 @@
+experiment: second
+seed: 42
+results_dir: precomputed_responses/qwen_3_7/online/arc_challenge/responses_surrogate_token_probs_1_large.csv
+max_new_tokens: 512
+calibrate: true
+calibration_size: 100
+costs:
+  output_input_price_ratio: 5
+  abst_lambda: 0.1
+  cost_lambda: 1.0e-05
+base_model: Qwen/Qwen2.5-1.5B-Instruct
+large_model: Qwen/Qwen2.5-7B-Instruct
+batch_size: 100
+max_input_length: 512
+online:
+  enable: true
+  initial_xi_base: 0.05
+  initial_xi_large: 0.05
+  initial_phi_base: 0.5
+  lr_tau: 0.05
+  lr_M: 0.05
+  error_penalty: 10
+verification_fn: surrogate_token_probs
+uncertainty_fn: surrogate_token_probs
+uncertainty_samples: 1
+precomputed:
+  enable: true
+  generation: true
+  verification: true
+  uncertainty: true
+  path: precomputed_responses/qwen_3_7/online/arc_challenge/responses_surrogate_token_probs_1_large.csv
+dataset:
+  name: allenai/ai2_arc
+  subset: ARC-Challenge
+  split: test
+  num_samples: 1000
+device: cuda:0
+name_postfix: responses

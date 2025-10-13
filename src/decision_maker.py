@@ -46,6 +46,7 @@ class AIDecisionSystem:
         self.costs = cost_config
         self.online_config = online_config
         self.use_larger_model = use_larger_model
+        self.expertiment = self.config.expertiment
 
         self.initial_phi_base = torch.log(torch.tensor(
             [online_config.initial_phi_base/(1-online_config.initial_phi_base)],
@@ -282,78 +283,79 @@ class AIDecisionSystem:
 
         u = random.random()
         # Predict Model 1
-        # if u < acceptance_probability:
-        #     return (
-        #         0,
-        #         base_response,
-        #         base_gen_cost 
-        #         + first_inf_cost,
-        #         base_uncert,
-        #         u,
-        #     )
-
-        # # Escalate to Model 2
-        # else:  
-        #     return (
-        #         1,
-        #         large_response,
-        #         base_gen_cost 
-        #         + first_inf_cost 
-        #         + large_gen_cost,
-        #         large_uncert,
-        #         u,
-        #     )
-        
-        
-        # Abstain Model 1
-        if base_sigma > F.sigmoid(self.xi_base):
-            return (
-                2,
-                f"Expert Reponse: The best answer is {expert_response}",
-                base_gen_cost 
-                + first_inf_cost,
-                base_uncert,
-                u,
-            )
-        
-        # Predict Model 1
-        elif acceptance_probability > F.sigmoid(self.phi_base):
-            return (
-                0,
-                base_response,
-                base_gen_cost 
-                + first_inf_cost,
-                base_uncert,
-                u,
-            )
-
-        # Escalate to Model 2
-        else:
-            # Abstain Model 2
-            if large_sigma > F.sigmoid(self.xi_large):
+        if self.expertiment=="first":
+            if u < acceptance_probability:
                 return (
-                    2,
-                    f"Expert Reponse: The best answer is {expert_response}",
-                    base_gen_cost
-                    + large_inf_cost
-                    + large_gen_cost
-                    + large_uncert_cost,
-                    large_uncert,
+                    0,
+                    base_response,
+                    base_gen_cost 
+                    + first_inf_cost,
+                    base_uncert,
                     u,
                 )
-            
-            # Predict Model 2
+
+            # Escalate to Model 2
             else:  
                 return (
                     1,
                     large_response,
                     base_gen_cost 
                     + first_inf_cost 
-                    + large_gen_cost
-                    + large_uncert_cost,
+                    + large_gen_cost,
                     large_uncert,
                     u,
                 )
+        
+        else:
+            # Abstain Model 1
+            if base_sigma > F.sigmoid(self.xi_base):
+                return (
+                    2,
+                    f"Expert Reponse: The best answer is {expert_response}",
+                    base_gen_cost 
+                    + first_inf_cost,
+                    base_uncert,
+                    u,
+                )
+            
+            # Predict Model 1
+            elif acceptance_probability > F.sigmoid(self.phi_base):
+                return (
+                    0,
+                    base_response,
+                    base_gen_cost 
+                    + first_inf_cost,
+                    base_uncert,
+                    u,
+                )
+
+            # Escalate to Model 2
+            else:
+                # Abstain Model 2
+                if large_sigma > F.sigmoid(self.xi_large):
+                    return (
+                        2,
+                        f"Expert Reponse: The best answer is {expert_response}",
+                        base_gen_cost
+                        + large_inf_cost
+                        + large_gen_cost
+                        + large_uncert_cost,
+                        large_uncert,
+                        u,
+                    )
+                
+                # Predict Model 2
+                else:  
+                    return (
+                        1,
+                        large_response,
+                        base_gen_cost 
+                        + first_inf_cost 
+                        + large_gen_cost
+                        + large_uncert_cost,
+                        large_uncert,
+                        u,
+                    )
 
     def update_parameters(self):
         """Update model parameters using minibatches from the replay buffer."""
@@ -478,7 +480,6 @@ class AIDecisionSystem:
         abst_proba = abstain_M1 + proba_deferred_not_abstrained * abstain_M2
         
         # Cascade
-        # + 
         cascade_system_risk = (1 - correct_proba) + self.costs.cost_lambda * expected_cost + self.costs.abst_lambda * abst_proba
         
         # Only small model risk

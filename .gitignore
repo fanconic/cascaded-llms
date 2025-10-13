@@ -56,5 +56,6 @@ legacy/
 outputs/
 followup_results*/
 results*/
+file_processor*
 
 neurips_save

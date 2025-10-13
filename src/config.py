@@ -43,6 +43,7 @@ class ExperimentConfig:
     device: str
     use_larger_model: str
     precomputed: Dict
+    experiment: str
     uncertainty_samples: int = 1
     batch_size: int = 5
 

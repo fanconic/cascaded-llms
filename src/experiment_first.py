@@ -37,9 +37,9 @@ class Experiment_first:
         self.dataset, self.dataset_length = self._load_dataset()
         self.preprocessor = get_preprocessor(cfg.dataset.name)
 
-        self.use_larger_models = ["large"] #["base", "large"] #, "ensemble"]
-        self.number_of_repetition = [1] #[1, 5]
-        self.verification_funcs = [surrogate_token_probs] #[self_verification, surrogate_token_probs]
+        self.use_larger_models = ["base", "large"] #, "ensemble"]
+        self.number_of_repetition = [1, 5]
+        self.verification_funcs = [self_verification, surrogate_token_probs]
 
         # Initialize models
         if not (
@@ -76,6 +76,7 @@ class Experiment_first:
                         uncertainty_samples=n,
                         batch_size=cfg.batch_size,
                         use_larger_model=use_larger_model,
+                        experiment="first",
                     )
 
                     decision_system = DecisionMakerFactory.create_decision_maker(

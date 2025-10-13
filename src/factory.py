@@ -25,6 +25,7 @@ class DecisionMakerFactory:
             uncertainty_samples=exp_config.uncertainty_samples,
             batch_size=exp_config.batch_size,
             use_larger_model=exp_config.use_larger_model,
+            experiment=exp_config.experiment
         )
 
         cost_config_obj = CostConfig(**cost_config)
