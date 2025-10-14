@@ -66,3 +66,13 @@ Example usages:
 # Example for ARC2-Easy
 python main.py --config-path=precomputed_responses/llama_1_8/online/arc_easy
 ```
+
+### Citation
+```bash
+@inproceedings{Fanconi2025Towards,
+  title={Towards a Cascaded LLM Framework for Cost-effective Human-AI Decision-Making},
+  author={Fanconi, Claudio and van der Schaar, Mihaela},
+  booktitle={39th Conference on Neural Information Processing Systems},
+  year={2025}
+}
+```
