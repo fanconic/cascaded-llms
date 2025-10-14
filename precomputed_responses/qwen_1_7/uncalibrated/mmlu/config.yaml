@@ -10,7 +10,7 @@ costs:
   cost_lambda: 1.0e-05
 base_model: Qwen/Qwen2.5-1.5B-Instruct
 large_model: Qwen/Qwen2.5-7B-Instruct
-batch_size: 10000
+batch_size: 100
 max_input_length: 512
 online:
   enable: false
@@ -34,6 +34,6 @@ dataset:
   subset: all
   split: test
   num_samples: -1
-device: cuda:1
+device: cuda:0
 name_postfix: responses
 subject: null

@@ -34,5 +34,6 @@ dataset:
   subset: ARC-Challenge
   split: test
   num_samples: -1
-device: cuda:1
+device: cuda:0
 name_postfix: responses
+subject: null

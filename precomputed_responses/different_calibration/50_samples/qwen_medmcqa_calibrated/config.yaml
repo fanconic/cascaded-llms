@@ -36,3 +36,4 @@ dataset:
   num_samples: -1
 device: cuda:0
 name_postfix: first_qwen_medmcqa_calibrated
+subject: null

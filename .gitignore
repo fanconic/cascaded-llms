@@ -57,5 +57,6 @@ outputs/
 followup_results*/
 results*/
 file_processor*
+*_copy
 
 neurips_save

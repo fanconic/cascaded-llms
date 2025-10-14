@@ -46,7 +46,7 @@ class AIDecisionSystem:
         self.costs = cost_config
         self.online_config = online_config
         self.use_larger_model = use_larger_model
-        self.expertiment = self.config.expertiment
+        self.experiment = self.config.experiment
 
         self.initial_phi_base = torch.log(torch.tensor(
             [online_config.initial_phi_base/(1-online_config.initial_phi_base)],
@@ -283,7 +283,7 @@ class AIDecisionSystem:
 
         u = random.random()
         # Predict Model 1
-        if self.expertiment=="first":
+        if self.experiment=="first":
             if u < acceptance_probability:
                 return (
                     0,

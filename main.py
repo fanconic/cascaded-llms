@@ -8,7 +8,7 @@ from src.experiment_second import Experiment_second
 from src.utils import set_seed
 
 
-@hydra.main(config_path="configs", config_name="debug", version_base="1.3")
+@hydra.main(config_path="configs", config_name="config", version_base="1.3")
 def main(cfg: DictConfig):
     set_seed(cfg.seed)
     if cfg.experiment == "first":

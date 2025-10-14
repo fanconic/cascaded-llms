@@ -20,6 +20,7 @@ class ModelConfig:
     uncertainty_samples: int = 1
     batch_size: int = 5
     use_larger_model: str = "base"
+    experiment: str = "first"
 
 
 @dataclass

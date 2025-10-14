@@ -6,30 +6,20 @@ calibrate: false
 calibration_size: 100
 costs:
   output_input_price_ratio: 5
-  base_gen_cost: 1.0
-  large_inf_cost: 0.3
-  large_gen_cost: 5.0
-  expert_cost: 6.69
-  mistake_cost: 16.81
+  abst_lambda: 0.1
+  cost_lambda: 1.0e-05
 base_model: meta-llama/Llama-3.2-3B-Instruct
 large_model: meta-llama/Llama-3.1-8B-Instruct
-batch_size: 7
+batch_size: 100
 max_input_length: 512
 online:
   enable: false
-  initial_uncertainty_threshold_base: 5.0
-  initial_uncertainty_threshold_large: 5.0
-  initial_M: 0.0
-  lr_tau: 0.01
-  lr_M: 0.005
+  initial_xi_base: 0.05
+  initial_xi_large: 0.05
+  initial_phi_base: 0.5
+  lr_tau: 0.05
+  lr_M: 0.05
   error_penalty: 10
-sft:
-  enable: false
-  learning_rate: 0.0001
-  buffer_size: 1
-  lora_r: 32
-  lora_alpha: 64
-  lora_dropout: 0.1
 verification_fn: surrogate_token_probs
 uncertainty_fn: surrogate_token_probs
 uncertainty_samples: 1
@@ -44,5 +34,6 @@ dataset:
   subset: ARC-Easy
   split: test
   num_samples: -1
-device: cuda:3
+device: cuda:0
 name_postfix: responses
+subject: null

@@ -34,5 +34,6 @@ dataset:
   subset: null
   split: validation
   num_samples: -1
-device: cuda:2
+device: cuda:0
 name_postfix: responses
+subject: null

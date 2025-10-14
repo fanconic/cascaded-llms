@@ -36,23 +36,18 @@ conda activate llms
 └── src/                        # Core source code
 ```
 
-### Run main file
-This will run the main decision process with the `configs/debug.yaml` as configuration file.
-```bash
-python main.py
-```
 
 ### Experiment 1: Deferral Strategies
 Run the commands below for the chosen dataset (`arc_easy`, `arc_challenge`, `medqa`, `medmcqa`, or `mmlu`), substituting the model configuration (`llama_1_8`, `llama_3_8`, `qwen_1_7`, `qwen_3_7`) as desired, and the calibration (`calibrated` or `uncalibrated`):
 
 ```bash
-# Example for ARC2-Easy
 python main.py --config-path=precomputed_responses/<model_config>/<calibration>/<dataset>
 ```
 
 Example usages:
 
 ```bash
+# Example for ARC2-Easy
 python main.py --config-path=precomputed_responses/llama_1_8/calibrated/arc_easy
 ```
 
@@ -62,12 +57,12 @@ Run the commands below for the chosen dataset (`arc_easy`, `arc_challenge`, `med
 
 
 ```bash
-# Example for ARC2-Easy
 python main.py --config-path=precomputed_responses/<model_config>/online/<dataset>
 ```
 
 Example usages:
 
 ```bash
+# Example for ARC2-Easy
 python main.py --config-path=precomputed_responses/llama_1_8/online/arc_easy
 ```
