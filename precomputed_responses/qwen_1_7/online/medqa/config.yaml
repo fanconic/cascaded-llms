@@ -1,6 +1,6 @@
 experiment: second
 seed: 42
-results_dir: precomputed_responses/qwen_1_7/online/medqa/responses_surrogate_token_probs_1_large.csv
+results_dir: precomputed_responses/qwen_1_7/online/medqa
 max_new_tokens: 512
 calibrate: true
 calibration_size: 100

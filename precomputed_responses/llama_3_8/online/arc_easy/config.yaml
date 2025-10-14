@@ -1,6 +1,6 @@
 experiment: second
 seed: 42
-results_dir: precomputed_responses/llama_3_8/online/arc_easy/responses_surrogate_token_probs_1_large.csv
+results_dir: precomputed_responses/llama_3_8/online/arc_easy
 max_new_tokens: 512
 calibrate: true
 calibration_size: 100

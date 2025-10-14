@@ -1,6 +1,6 @@
 experiment: second
 seed: 42
-results_dir: results_neurips
+results_dir: precomputed_responses/llama_1_8/online/mmlu
 max_new_tokens: 768
 calibrate: true
 calibration_size: 100
@@ -28,7 +28,7 @@ precomputed:
   generation: true
   verification: true
   uncertainty: true
-  path: /home/azureuser/caf83/cascaded-llms/neurips_save/run_20250730_200801_gen_mmlu_llama_1_8/results_gen_mmlu_llama_1_8_surrogate_token_probs_1_large.csv
+  path: precomputed_responses/llama_1_8/online/mmlu/responses_surrogate_token_probs_1_large.csv
 dataset:
   name: cais/mmlu
   subset: all

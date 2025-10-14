@@ -109,17 +109,8 @@ class Experiment_second:
                             f"Precomputed results file not found at {precomputed_path}"
                         )
                 else:
-                    # If it's a directory, use the original log
-                    # Extract name_postfix from the last folder in precomputed.path
-                    last_folder = os.path.basename(
-                        os.path.normpath(self.cfg.precomputed.path)
-                    )
-                    name_postfix = (
-                        "_".join(last_folder.split("_")[3:])
-                        if "_" in last_folder
-                        else ""
-                    )
-                    file_name = f"results_{name_postfix}_{experiment_name}.csv"
+                    
+                    file_name = f"{self.cfg.name_postfix}_{experiment_name}.csv"
                     if "ensemble" in experiment_name: 
                         file_name = file_name.replace("ensemble", "large")
                     precomputed_path = os.path.join(
@@ -152,8 +143,9 @@ class Experiment_second:
 
     def _setup_run_directory(self) -> str:
         now = datetime.datetime.now()
-        run_name = f"run_{now.strftime('%Y%m%d_%H%M%S')}_{self.cfg.name_postfix}"
-        run_dir = os.path.join(self.cfg.results_dir, run_name)
+        #run_name = f"run_{now.strftime('%Y%m%d_%H%M%S')}_{self.cfg.name_postfix}"
+        run_name = self.cfg.name_postfix
+        run_dir = os.path.join(self.cfg.results_dir)
         os.makedirs(run_dir, exist_ok=True)
 
         config_file = os.path.join(run_dir, "config.yaml")
@@ -446,7 +438,7 @@ class Experiment_second:
             data.to_csv(
                 os.path.join(
                     self.run_dir,
-                    f"results_{self.cfg.name_postfix}_{experiment_name}.csv",
+                    f"{self.cfg.name_postfix}_{experiment_name}.csv",
                 ),
                 index=False,
             )
