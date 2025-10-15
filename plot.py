@@ -102,33 +102,48 @@ def load_experiment_data_from_csv(csv_path):
 
 
 def plot_all_datasets(base_dir, datasets, output_path):
-    fig = plt.figure(figsize=(11, 7))
+    # Pre-check whether MMLU has data
+    mmlu_path = os.path.join(base_dir, "mmlu", "metrics_combined.csv")
+    mmlu_has_data = False
+    if os.path.exists(mmlu_path):
+        df_mmlu = pd.read_csv(mmlu_path)
+        if "subject" in df_mmlu.columns:
+            df_mmlu = df_mmlu[df_mmlu["subject"] == "all"]
+        mmlu_has_data = not df_mmlu.empty
 
-    # --- Top row: 3 subplots evenly spaced ---
-    axes_top = [
-        fig.add_axes([0.07 + i * 0.31, 0.55, 0.26, 0.35])  # [left, bottom, width, height]
-        for i in range(3)
-    ]
-
-    # --- Bottom row: 2 subplots centered and closer together ---
-    axes_bottom = [
-        fig.add_axes([0.22 + i * 0.31, 0.10, 0.26, 0.35])  # centred (start at 0.22 instead of 0.07)
-        for i in range(2)
-    ]
-
-    axes = axes_top + axes_bottom
+    # --- Figure layout depending on whether MMLU has data ---
+    if mmlu_has_data:
+        fig = plt.figure(figsize=(11, 7))
+        # Top row: 3 plots, bottom row: 2 centred
+        axes_top = [fig.add_axes([0.07 + i * 0.31, 0.55, 0.26, 0.35]) for i in range(3)]
+        axes_bottom = [fig.add_axes([0.22 + i * 0.31, 0.10, 0.26, 0.35]) for i in range(2)]
+        axes = axes_top + axes_bottom
+    else:
+        fig = plt.figure(figsize=(11, 3.5))
+        # Single row with 4 evenly spaced subplots
+        axes = [fig.add_axes([0.07 + i * 0.23, 0.15, 0.20, 0.70]) for i in range(4)]
     all_handles = []
     all_labels = []
 
-    for i, dataset in enumerate(datasets):
+    plot_idx = 0  # keep track of how many plots we actually draw
+    for dataset in datasets:
         dataset_dir = os.path.join(base_dir, dataset)
         csv_path = os.path.join(dataset_dir, "metrics_combined.csv")
         if not os.path.exists(csv_path):
             print(f"⚠️ Skipping {dataset}: no metrics_combined.csv found")
             continue
 
+        if dataset == "mmlu" and not mmlu_has_data:
+            print("⚠️ Skipping MMLU: no 'all' subject data available")
+            continue
+
+        if plot_idx >= len(axes):
+            print(f"⚠️ No available axes for {dataset}, skipping.")
+            continue
+
         experiment_data_list = load_experiment_data_from_csv(csv_path)
-        ax = axes[i]
+        ax = axes[plot_idx]
+        plot_idx += 1
 
         handles = plot_accuracy_vs_cost_D1(ax, experiment_data_list, len(experiment_data_list))
 
@@ -168,7 +183,7 @@ def plot_all_datasets(base_dir, datasets, output_path):
         loc="lower center",
         ncol=5,
         frameon=False,
-        bbox_to_anchor=(0.5, -0.03)
+        bbox_to_anchor=(0.5, -0.03) if mmlu_has_data else (0.5, -0.15)
     )
 
     plt.tight_layout(rect=[0, 0.05, 1, 1])
@@ -178,7 +193,7 @@ def plot_all_datasets(base_dir, datasets, output_path):
 
 
 if __name__ == "__main__":
-    BASE_DIR = "precomputed_responses/qwen_3_7/calibrated"
+    BASE_DIR = "precomputed_responses/qwen_3_7/uncalibrated"
     DATASETS = ["arc_easy", "arc_challenge", "mmlu", "medqa", "medmcqa",]
     OUTPUT_PATH = os.path.join(BASE_DIR, "accuracy_vs_cost_all.pdf")
     plot_all_datasets(BASE_DIR, DATASETS, OUTPUT_PATH)
