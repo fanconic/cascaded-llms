@@ -193,7 +193,7 @@ def plot_all_datasets(base_dir, datasets, output_path):
 
 
 if __name__ == "__main__":
-    BASE_DIR = "precomputed_responses/qwen_3_7/uncalibrated"
+    BASE_DIR = "precomputed_responses/llama_1_8/calibrated"
     DATASETS = ["arc_easy", "arc_challenge", "mmlu", "medqa", "medmcqa",]
     OUTPUT_PATH = os.path.join(BASE_DIR, "accuracy_vs_cost_all.pdf")
     plot_all_datasets(BASE_DIR, DATASETS, OUTPUT_PATH)
