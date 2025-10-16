@@ -60,3 +60,4 @@ class OnlineConfig:
     lr_tau: float
     lr_M: float
     error_penalty: float
+    method: str

@@ -359,71 +359,115 @@ class AIDecisionSystem:
 
     def update_parameters(self):
         """Update model parameters using minibatches from the replay buffer."""
-        random.shuffle(self.replay_buffer)
-
         if len(self.replay_buffer) < self.batch_size:
             return  # Not enough data to update
 
+        random.shuffle(self.replay_buffer)
 
-        for i in range(
-            len(self.replay_buffer) // self.batch_size - 1
-        ):  # Perform multiple gradient steps
-            # Sample a random minibatch from the replay buffer
-            minibatch = self.replay_buffer[
-                i * self.batch_size : i * self.batch_size + self.batch_size
-            ]
+        # Combine all data from replay buffer for grid search if needed
+        if self.online_config.method == "grid":
+            # Collect calibration distributions and costs
+            all_large_probs_for_base = []
+            all_large_uncerts = []
+            all_costs = []
+            for d in self.replay_buffer:
+                all_large_probs_for_base.append(torch.tensor(d["large_probs_for_base_dist"]).to(self.config.device))
+                all_large_uncerts.append(torch.tensor(d["large_uncertainties_dist"]).to(self.config.device))
+                all_costs.append({
+                    "base_gen_cost": d["base_gen_cost"],
+                    "large_gen_cost": d["large_gen_cost"],
+                    "large_inf_cost": d["large_inf_cost"],
+                    "large_uncert_cost": d["large_uncert_cost"],
+                })
 
-            total_loss, total_loss_base, total_loss_large = 0.0, 0.0, 0.0
-            for decision in minibatch:
-                # Extract relevant data for this decision
-                large_probs_for_base = torch.tensor(decision["large_probs_for_base_dist"]).to(
-                    self.config.device
-                )
-                large_uncert = torch.tensor(decision["large_uncertainties_dist"]).to(
-                    self.config.device
-                )
-                
+            # Define grid values in (0, 1)
+            phi_grid = torch.linspace(0.05, 0.95, 10).to(self.config.device)
+            xi_base_grid = torch.linspace(0.05, 0.95, 10).to(self.config.device)
+            xi_large_grid = torch.linspace(0.05, 0.95, 10).to(self.config.device)
 
-                # Compute system risk
-                system_risk, system_risk_base , system_risk_large = self._calculate_system_risk(
-                    self.phi_base,
-                    self.xi_base,
-                    self.xi_large,
-                    self.xi_base_single,
-                    self.xi_large_single,
-                    large_probs_for_base,
-                    large_uncert,
-                    base_gen_cost=decision["base_gen_cost"],
-                    large_gen_cost=decision["large_gen_cost"],
-                    large_inf_cost=decision["large_inf_cost"],
-                    large_uncert_cost=decision["large_uncert_cost"],
-                )
-                
-                system_risk = system_risk.to(self.config.device)
-                system_risk_base = system_risk_base.to(self.config.device)
-                system_risk_large = system_risk_large.to(self.config.device)
+            # All combinations
+            Phi, Xi_b, Xi_l = torch.meshgrid(phi_grid, xi_base_grid, xi_large_grid, indexing='ij')
+            grid_shape = Phi.shape
+            phi_flat = Phi.reshape(-1)
+            xi_b_flat = Xi_b.reshape(-1)
+            xi_l_flat = Xi_l.reshape(-1)
 
-                total_loss += system_risk
-                total_loss_base += system_risk_base
-                total_loss_large += system_risk_large
-                
-            # Normalize the loss over the minibatch
-            total_loss /= self.batch_size
-            total_loss_base /= self.batch_size
-            total_loss_large /= self.batch_size
-            
-            # Perform gradient update
-            self.optimizer.zero_grad()
-            self.optimizer_base.zero_grad()
-            self.optimizer_large.zero_grad()
-            
-            total_loss.backward()
-            total_loss_base.backward()
-            total_loss_large.backward()
-            
-            self.optimizer.step()
-            self.optimizer_base.step()
-            self.optimizer_large.step()
+            losses = torch.zeros_like(phi_flat)
+
+            for i in range(len(all_large_probs_for_base)):
+                # Broadcast losses for all grid points simultaneously
+                loss_batch = []
+                for j in range(len(phi_flat)):
+                    loss, _, _ = self._calculate_system_risk(
+                        torch.logit(phi_flat[j]),
+                        torch.logit(xi_b_flat[j]),
+                        torch.logit(xi_l_flat[j]),
+                        self.xi_base_single,
+                        self.xi_large_single,
+                        all_large_probs_for_base[i],
+                        all_large_uncerts[i],
+                        base_gen_cost=all_costs[i]["base_gen_cost"],
+                        large_gen_cost=all_costs[i]["large_gen_cost"],
+                        large_inf_cost=all_costs[i]["large_inf_cost"],
+                        large_uncert_cost=all_costs[i]["large_uncert_cost"],
+                    )
+                    loss_batch.append(loss)
+
+                losses += torch.stack(loss_batch)
+
+            best_idx = torch.argmin(losses)
+            phi_opt = phi_flat[best_idx].item()
+            xi_b_opt = xi_b_flat[best_idx].item()
+            xi_l_opt = xi_l_flat[best_idx].item()
+            self.xi_base.data = torch.tensor([xi_b_opt], device=self.config.device)
+            self.xi_large.data = torch.tensor([xi_l_opt], device=self.config.device)
+            self.phi_base.data = torch.tensor([phi_opt], device=self.config.device)
+
+            print(f"[GridSearch Update] φ={phi_opt:.3f}, ξ_b={xi_b_opt:.3f}, ξ_l={xi_l_opt:.3f}")
+
+        else:
+            # === Your original gradient-based update ===
+            for i in range(len(self.replay_buffer) // self.batch_size - 1):
+                minibatch = self.replay_buffer[i * self.batch_size : i * self.batch_size + self.batch_size]
+
+                total_loss, total_loss_base, total_loss_large = 0.0, 0.0, 0.0
+                for decision in minibatch:
+                    large_probs_for_base = torch.tensor(decision["large_probs_for_base_dist"]).to(self.config.device)
+                    large_uncert = torch.tensor(decision["large_uncertainties_dist"]).to(self.config.device)
+
+                    system_risk, system_risk_base , system_risk_large = self._calculate_system_risk(
+                        self.phi_base,
+                        self.xi_base,
+                        self.xi_large,
+                        self.xi_base_single,
+                        self.xi_large_single,
+                        large_probs_for_base,
+                        large_uncert,
+                        base_gen_cost=decision["base_gen_cost"],
+                        large_gen_cost=decision["large_gen_cost"],
+                        large_inf_cost=decision["large_inf_cost"],
+                        large_uncert_cost=decision["large_uncert_cost"],
+                    )
+
+                    total_loss += system_risk
+                    total_loss_base += system_risk_base
+                    total_loss_large += system_risk_large
+
+                total_loss /= self.batch_size
+                total_loss_base /= self.batch_size
+                total_loss_large /= self.batch_size
+
+                self.optimizer.zero_grad()
+                self.optimizer_base.zero_grad()
+                self.optimizer_large.zero_grad()
+
+                total_loss.backward()
+                total_loss_base.backward()
+                total_loss_large.backward()
+
+                self.optimizer.step()
+                self.optimizer_base.step()
+                self.optimizer_large.step()
 
     
     def _calculate_system_risk2(

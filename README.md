@@ -3,6 +3,8 @@
 <img src="./assets/figure_1.png" width="800" alt="Method overview diagram">
 </div>
 
+This is the repository to reproduce the experimental results for the paper ["Towards a Cascaded LLM Framework for Cost-effective Human-AI Decision-Making"](https://arxiv.org/abs/2506.11887).
+
 ## Abstract
 Effective human-AI decision-making balances three key factors: the *correctness* of predictions, the *cost* of knowledge and reasoning complexity, and the confidence about whether to *abstain* from automated answers or involve human experts. In this work, we present a cascaded LLM decision framework that adaptively delegates tasks across multiple tiers of expertise -- a base model for initial candidate answers, a more capable and knowledgeable (but costlier) large model, and a human expert for when the model cascade abstains. Our method proceeds in two stages. First, a deferral policy determines whether to accept the base model’s answer or regenerate it with the large model based on the confidence score. Second, an abstention policy decides whether the cascade model response is sufficiently certain or requires human intervention. Moreover, we incorporate an online learning mechanism in the framework that can leverage human feedback to improve decision quality over time. We demonstrate this approach to general question-answering (ARC-Easy and ARC-Challenge) and medical question-answering (MedQA and MedMCQA). Our results demonstrate that our cascaded strategy outperforms single-model baselines in most cases, achieving higher accuracy while reducing costs and providing a principled approach to handling abstentions.
 
@@ -11,7 +13,7 @@ Effective human-AI decision-making balances three key factors: the *correctness*
 ### Prerequisites
 - Python 3.11
 - CUDA toolkit 12.2 (for GPU support)
-- 1 x A100 (80GB) GPU
+- 1 x A100 (80GB) GPU (if you are generating the responses from scratch! Else a simple GPU should do it)
 
 ### Installation
 

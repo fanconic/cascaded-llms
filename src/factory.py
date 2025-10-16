@@ -38,6 +38,7 @@ class DecisionMakerFactory:
             lr_tau=online_config.lr_tau,
             lr_M=online_config.lr_M,
             error_penalty=online_config.error_penalty,
+            method=getattr(online_config, "method", "gradient")
         )
 
         return AIDecisionSystem(
